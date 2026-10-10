@@ -204,6 +204,7 @@ void CrossPointWebServer::begin() {
   server->on("/js/jszip.min.js", HTTP_GET, [this] { handleJszip(); });
 
   server->on("/api/status", HTTP_GET, [this] { handleStatus(); });
+  server->on("/api/reading-stats", HTTP_GET, [this] { handleReadingStats(); });
   server->on("/api/files", HTTP_GET, [this] { handleFileListData(); });
   server->on("/download", HTTP_GET, [this] { handleDownload(); });
 
@@ -511,6 +512,18 @@ void CrossPointWebServer::handleNotFound() const {
   String message = "404 Not Found\n\n";
   message += "URI: " + server->uri() + "\n";
   server->send(404, "text/plain", message);
+}
+
+void CrossPointWebServer::handleReadingStats() const {
+  const char* path = "/ReadingStats/sessions.jsonl";
+  HalFile file = Storage.open(path, O_RDONLY);
+  if (!file || !file.isOpen()) {
+    server->send(200, "application/json", "[]");
+    return;
+  }
+  server->setContentLength(file.size());
+  server->send(200, "application/json", "");
+  streamFileToClient(file);
 }
 
 void CrossPointWebServer::handleStatus() const {

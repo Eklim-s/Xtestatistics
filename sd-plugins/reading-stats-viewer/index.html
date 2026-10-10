@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reading Statistics</title>
+<style>
+  :root {
+    --bg: #f8f9fa;
+    --card: #fff;
+    --text: #2c3e50;
+    --muted: #7f8c8d;
+    --border: #dee2e6;
+    --accent: #27ae60;
+    --accent2: #3498db;
+    --fire: #e74c3c;
+    --gold: #f39c12;
+    --bar: #2ecc71;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1a1a2e;
+      --card: #16213e;
+      --text: #e0e0e0;
+      --muted: #999;
+      --border: #2a2a4a;
+      --bar: #2ecc71;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 16px;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 22px; margin-bottom: 16px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 12px;
+  }
+  .streak { font-size: 28px; font-weight: 700; }
+  .streak .fire { color: var(--fire); }
+  .streak-sub { font-size: 13px; color: var(--muted); }
+  .stats-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .stat-box {
+    flex: 1;
+    min-width: 90px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px;
+    text-align: center;
+  }
+  .stat-box .num { font-size: 22px; font-weight: 700; }
+  .stat-box .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+  .bar-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 100px;
+    padding: 8px 0;
+  }
+  .bar-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .bar {
+    width: 100%;
+    max-width: 32px;
+    background: var(--bar);
+    border-radius: 3px 3px 0 0;
+    min-height: 2px;
+    transition: height 0.3s;
+  }
+  .bar-label { font-size: 10px; color: var(--muted); margin-top: 4px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .cal-cell {
+    aspect-ratio: 1;
+    border-radius: 3px;
+    font-size: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    min-width: 28px;
+  }
+  .dow { font-size: 9px; color: var(--muted); text-align: center; padding: 2px; }
+  .book-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .book-row:last-child { border-bottom: none; }
+  .book-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 70%; }
+  .book-time { font-weight: 600; color: var(--accent2); }
+  .loading { text-align: center; padding: 40px; color: var(--muted); }
+  .no-data { text-align: center; padding: 30px; color: var(--muted); font-style: italic; }
+</style>
+</head>
+<body>
+<h1>Reading Stats</h1>
+<div id="loading" class="loading">Loading…</div>
+<div id="content" style="display:none">
+  <div class="card" id="streak-card">
+    <div class="streak"><span class="fire">🔥</span> <span id="streak-num">0</span> <span style="font-size:16px">days</span></div>
+    <div class="streak-sub">Record: <span id="record-num">0</span> days</div>
+  </div>
+  <div class="stats-row" id="stats-row"></div>
+  <div class="card" id="week-card">
+    <h3 style="font-size:14px;margin-bottom:8px;color:var(--muted);text-transform:uppercase">Last 7 Days</h3>
+    <div class="bar-chart" id="bar-chart"></div>
+  </div>
+  <div class="card">
+    <h3 style="font-size:14px;margin-bottom:8px;color:var(--muted);text-transform:uppercase">Calendar</h3>
+    <div id="cal-header" style="display:flex;justify-content:center;gap:8px;margin-bottom:6px;font-weight:600"></div>
+    <div class="dow" style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px"></div>
+    <div class="cal-grid" id="cal-grid"></div>
+  </div>
+  <div class="card" id="books-card">
+    <h3 style="font-size:14px;margin-bottom:8px;color:var(--muted);text-transform:uppercase">Books</h3>
+    <div id="book-list"></div>
+  </div>
+</div>
+<script>
+(async function() {
+  try {
+    var resp = await fetch('/api/reading-stats');
+    var text = await resp.text();
+    var lines = text.trim().split('\n').filter(Boolean);
+    if (lines.length === 0) {
+      document.getElementById('loading').innerHTML = '<div class="no-data">No reading data yet. Start reading on your device!</div>';
+      return;
+    }
+    var sessions = [];
+    lines.forEach(function(line) {
+      try { sessions.push(JSON.parse(line)); } catch(e) {}
+    });
+    if (sessions.length === 0) {
+      document.getElementById('loading').innerHTML = '<div class="no-data">No reading data yet.</div>';
+      return;
+    }
+    renderStats(sessions);
+  } catch(e) {
+    document.getElementById('loading').textContent = 'Error loading stats: ' + e.message;
+  }
+})();
+
+function renderStats(sessions) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+
+  var now = Math.floor(Date.now() / 1000);
+  var dayMin = {}, bookMin = {}, totalSec = 0;
+  sessions.forEach(function(s) {
+    var dur = parseInt(s.d) || 0;
+    totalSec += dur;
+    var d = new Date(parseInt(s.s) * 1000);
+    var key = d.getUTCFullYear() + '-' +
+              String(d.getUTCMonth()+1).padStart(2,'0') + '-' +
+              String(d.getUTCDate()).padStart(2,'0');
+    dayMin[key] = (dayMin[key] || 0) + Math.round(dur / 60);
+    var book = (s.b || 'Unknown').split('/').pop().replace(/\.\w+$/, '');
+    bookMin[book] = (bookMin[book] || 0) + Math.round(dur / 60);
+  });
+
+  var totalMin = Math.round(totalSec / 60);
+  var days = Object.keys(dayMin).sort();
+
+  // Streak
+  var yesterday = new Date((now - 86400) * 1000);
+  var streak = 0, record = 0, run = 0;
+  var d = new Date(yesterday);
+  while (true) {
+    var key = d.getUTCFullYear() + '-' + String(d.getUTCMonth()+1).padStart(2,'0') + '-' + String(d.getUTCDate()).padStart(2,'0');
+    if (!dayMin[key] || dayMin[key] < 1) break;
+    streak++;
+    d.setUTCDate(d.getUTCDate() - 1);
+  }
+  // Record streak
+  var allDays = days.slice();
+  var prev = null;
+  allDays.forEach(function(k) {
+    if (!prev) { run = 1; }
+    else {
+      var p = new Date(prev + 'T00:00:00Z');
+      var c = new Date(k + 'T00:00:00Z');
+      if ((c - p) / 86400000 === 1) run++;
+      else { if (run > record) record = run; run = 1; }
+    }
+    prev = k;
+  });
+  if (run > record) record = run;
+
+  document.getElementById('streak-num').textContent = streak;
+  document.getElementById('record-num').textContent = record;
+
+  // Stat boxes
+  var todayKey = new Date(now * 1000).toISOString().slice(0,10);
+  var todayMin = dayMin[todayKey] || 0;
+  var avgMin = days.length ? Math.round(totalMin / days.length) : 0;
+  var stats = [
+    {num: todayMin, lbl: 'Today (min)'},
+    {num: totalMin, lbl: 'Total (min)'},
+    {num: avgMin, lbl: 'Avg/day (min)'},
+    {num: days.length, lbl: 'Days read'}
+  ];
+  var row = document.getElementById('stats-row');
+  row.innerHTML = stats.map(function(s) {
+    return '<div class="stat-box"><div class="num">' + s.num + '</div><div class="lbl">' + s.lbl + '</div></div>';
+  }).join('');
+
+  // Bar chart
+  var last7 = [];
+  var d7 = new Date(now * 1000);
+  for (var i = 6; i >= 0; i--) {
+    var dd = new Date(d7);
+    dd.setUTCDate(dd.getUTCDate() - i);
+    var k = dd.toISOString().slice(0,10);
+    last7.push({day: dd.getUTCDate(), label: ['S','M','T','W','T','F','S'][dd.getUTCDay()], min: dayMin[k] || 0});
+  }
+  var max7 = Math.max.apply(null, last7.map(function(x) { return x.min; })) || 1;
+  var barHtml = last7.map(function(x) {
+    var h = Math.round(x.min / max7 * 90);
+    return '<div class="bar-col"><div style="font-size:10px;color:var(--muted);margin-bottom:2px">' + x.min + '</div>' +
+           '<div class="bar" style="height:' + (h || 2) + 'px" title="' + x.min + ' min"></div>' +
+           '<div class="bar-label">' + x.day + '/' + x.label + '</div></div>';
+  }).join('');
+  document.getElementById('bar-chart').innerHTML = barHtml;
+
+  // Calendar
+  var lastDay = days[days.length - 1];
+  var calDate = new Date(lastDay + 'T00:00:00Z');
+  var calYear = calDate.getUTCFullYear();
+  var calMonth = calDate.getUTCMonth();
+  var daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  var firstDow = new Date(calYear, calMonth, 1).getDay(); // 0=Sun
+  var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  document.getElementById('cal-header').innerHTML = '<span>' + months[calMonth] + ' ' + calYear + '</span>';
+
+  var dowRow = document.querySelector('#books-card').previousElementSibling.querySelector('.dow');
+  dowRow.innerHTML = ['S','M','T','W','T','F','S'].map(function(x) {
+    return '<div class="dow" style="text-align:center">' + x + '</div>';
+  }).join('');
+
+  var maxCal = 1;
+  for (var dd = 1; dd <= daysInMonth; dd++) {
+    var k = calYear + '-' + String(calMonth+1).padStart(2,'0') + '-' + String(dd).padStart(2,'0');
+    if (dayMin[k] > maxCal) maxCal = dayMin[k];
+  }
+
+  var calHtml = '';
+  // Empty cells before 1st
+  for (var i = 0; i < firstDow; i++) calHtml += '<div></div>';
+  for (var dd = 1; dd <= daysInMonth; dd++) {
+    var k = calYear + '-' + String(calMonth+1).padStart(2,'0') + '-' + String(dd).padStart(2,'0');
+    var m = dayMin[k] || 0;
+    var intensity = m > 0 ? 0.2 + (m / maxCal) * 0.8 : 0;
+    var bg = m > 0 ? 'rgba(46,204,113,' + intensity.toFixed(1) + ')' : 'transparent';
+    calHtml += '<div class="cal-cell" style="background:' + bg + '" title="' + dd + ': ' + m + ' min">' +
+               (m > 0 ? dd : '<span style="color:var(--muted)">' + dd + '</span>') + '</div>';
+  }
+  document.getElementById('cal-grid').innerHTML = calHtml;
+
+  // Books
+  var bookSort = Object.entries(bookMin).sort(function(a, b) { return b[1] - a[1]; });
+  var bookHtml = bookSort.map(function(b) {
+    var mins = b[1];
+    var h = Math.floor(mins / 60);
+    var m = mins % 60;
+    var time = h > 0 ? h + 'h ' + m + 'm' : m + 'm';
+    return '<div class="book-row"><span class="book-name">' + b[0] + '</span><span class="book-time">' + time + '</span></div>';
+  }).join('');
+  document.getElementById('book-list').innerHTML = bookHtml || '<div class="no-data" style="padding:10px">No books recorded</div>';
+}
+</script>
+</body>
+</html>

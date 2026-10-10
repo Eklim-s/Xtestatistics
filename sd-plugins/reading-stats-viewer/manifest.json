@@ -1,0 +1,5 @@
+{
+  "title": "Reading Stats Viewer",
+  "description": "Detailed reading statistics, streak tracking, and calendar heatmap",
+  "mount": "settings"
+}

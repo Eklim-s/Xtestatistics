@@ -18,6 +18,7 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "XtcReaderActivity.h"
+#include "reading_stats/ReadingStats.h"
 #include "util/PluginEvents.h"
 
 ReaderActivity::ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -126,7 +127,7 @@ void ReaderActivity::onExit() {
 void ReaderActivity::prepareForSleep() { flushReaderSession(); }
 
 void ReaderActivity::flushReaderSession() {
-  if (!readerSession.isEmitWorthy() || !pluginevents::anySubscriber(pluginevents::Event::ReaderSession)) {
+  if (!readerSession.isEmitWorthy()) {
     readerSession.reset();
     return;
   }
@@ -137,21 +138,29 @@ void ReaderActivity::flushReaderSession() {
         return std::isdigit(c) || (c >= 'a' && c <= 'f');
       });
   if (validDocument) {
-    char startTime[24];
-    char endTime[24];
-    char duration[16];
-    char startProgress[8];
-    char endProgress[8];
-    snprintf(startTime, sizeof(startTime), "%lld", static_cast<long long>(readerSession.startTime()));
-    snprintf(endTime, sizeof(endTime), "%lld", static_cast<long long>(readerSession.endTime()));
-    snprintf(duration, sizeof(duration), "%lu", static_cast<unsigned long>(readerSession.durationSeconds()));
-    snprintf(startProgress, sizeof(startProgress), "%u", readerSession.startProgressBp());
-    snprintf(endProgress, sizeof(endProgress), "%u", readerSession.endProgressBp());
-    const pluginevents::Var vars[] = {{"book", bookPath.c_str()},       {"document", document.c_str()},
-                                      {"start_time", startTime},        {"end_time", endTime},
-                                      {"duration_seconds", duration},   {"start_progress_bp", startProgress},
-                                      {"end_progress_bp", endProgress}, {"progress_scale", "10000"}};
-    pluginevents::emit(pluginevents::Event::ReaderSession, vars, 8);
+    // Persist session to SD card for reading statistics.
+    ReadingStats::appendSession(bookPath.c_str(), document.c_str(),
+                                readerSession.startTime(), readerSession.endTime(),
+                                readerSession.durationSeconds(),
+                                readerSession.startProgressBp(), readerSession.endProgressBp());
+
+    if (pluginevents::anySubscriber(pluginevents::Event::ReaderSession)) {
+      char startTime[24];
+      char endTime[24];
+      char duration[16];
+      char startProgress[8];
+      char endProgress[8];
+      snprintf(startTime, sizeof(startTime), "%lld", static_cast<long long>(readerSession.startTime()));
+      snprintf(endTime, sizeof(endTime), "%lld", static_cast<long long>(readerSession.endTime()));
+      snprintf(duration, sizeof(duration), "%lu", static_cast<unsigned long>(readerSession.durationSeconds()));
+      snprintf(startProgress, sizeof(startProgress), "%u", readerSession.startProgressBp());
+      snprintf(endProgress, sizeof(endProgress), "%u", readerSession.endProgressBp());
+      const pluginevents::Var vars[] = {{"book", bookPath.c_str()},       {"document", document.c_str()},
+                                        {"start_time", startTime},        {"end_time", endTime},
+                                        {"duration_seconds", duration},   {"start_progress_bp", startProgress},
+                                        {"end_progress_bp", endProgress}, {"progress_scale", "10000"}};
+      pluginevents::emit(pluginevents::Event::ReaderSession, vars, 8);
+    }
   }
   readerSession.reset();
 }
