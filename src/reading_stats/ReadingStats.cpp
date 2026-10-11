@@ -140,11 +140,11 @@ bool appendSession(const char* bookPath, const char* document,
       LOG_ERR("RDSTATS", "Cannot reopen for trim");
       return false;
     }
-    const size_t totalSize = static_cast<size_t>(rfile.size64());
+    const size_t totalSize = static_cast<size_t>(rfile.fileSize64());
     const size_t keepStart = totalSize / 2;
     // Find the first newline at or after keepStart to avoid a truncated line.
     rfile.seek(keepStart);
-    while (rfile.position() < rfile.size64()) {
+    while (rfile.position() < rfile.fileSize64()) {
       int c = rfile.read();
       if (c < 0) break;
       if (c == '\n') break;
