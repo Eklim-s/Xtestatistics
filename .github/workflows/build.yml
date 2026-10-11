@@ -18,8 +18,9 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install PlatformIO
-        run: pip install platformio
+      - name: Install PlatformIO and SCons
+        run: |
+          pip install platformio scons==4.4.0
 
       - name: Generate I18n
         run: python scripts/gen_i18n.py lib/I18n/translations lib/I18n/
