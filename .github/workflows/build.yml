@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -16,14 +16,33 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.13'
 
-      - name: Install PlatformIO and SCons
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+          enable-cache: false
+
+      - name: Install PlatformIO Core 6.1.19
         run: |
-          pip install platformio scons==4.4.0
+          uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+          uv pip install --system -U "littlefs-python>=0.16.0" "fatfs-ng>=0.1.14" "pyyaml>=6.0.2" \
+            "rich-click>=1.8.6" "zopfli>=0.2.2" "intelhex>=2.3.0" "rich>=14.0.0" "urllib3<2" \
+            "cryptography>=45.0.3" "certifi>=2025.8.3" "ecdsa>=0.19.1" "bitstring>=4.3.1" \
+            "reedsolo>=1.5.3,<1.8" "esp-idf-size>=2.0.0" "esp-coredump>=1.14.0"
 
-      - name: Generate I18n
-        run: python scripts/gen_i18n.py lib/I18n/translations lib/I18n/
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-v1-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-v1-${{ runner.os }}-
+
+      - name: Pin pioarduino core inside platform penv
+        run: |
+          pio pkg install -e default
+          uv pip install --python ~/.platformio/penv/bin/python "pioarduino==6.1.19"
 
       - name: Build firmware
         run: pio run -e default
