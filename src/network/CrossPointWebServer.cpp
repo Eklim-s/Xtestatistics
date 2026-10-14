@@ -518,11 +518,11 @@ void CrossPointWebServer::handleReadingStats() const {
   const char* path = "/ReadingStats/sessions.jsonl";
   HalFile file = Storage.open(path, O_RDONLY);
   if (!file || !file.isOpen()) {
-    server->send(200, "application/json", "[]");
+    server->send(200, "application/x-ndjson", "");
     return;
   }
   server->setContentLength(file.size());
-  server->send(200, "application/json", "");
+  server->send(200, "application/x-ndjson", "");
   streamFileToClient(file);
 }
 

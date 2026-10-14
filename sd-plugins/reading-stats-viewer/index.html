@@ -147,7 +147,15 @@
     }
     var sessions = [];
     lines.forEach(function(line) {
-      try { sessions.push(JSON.parse(line)); } catch(e) {}
+      try {
+        var obj = JSON.parse(line);
+        var start = Number(obj && obj.s);
+        var duration = Number(obj && obj.d);
+        if (!obj || Array.isArray(obj) || typeof obj !== 'object' ||
+            !Number.isSafeInteger(start) || !Number.isSafeInteger(duration) ||
+            duration <= 0 || duration > 86400) return;
+        sessions.push(obj);
+      } catch(e) {}
     });
     if (sessions.length === 0) {
       document.getElementById('loading').innerHTML = '<div class="no-data">No reading data yet.</div>';

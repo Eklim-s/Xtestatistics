@@ -4,6 +4,7 @@
 #include <Logging.h>
 #include <Memory.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -370,7 +371,7 @@ ReadingStatsSummary analyze(int maxDays, int64_t todayEpoch) {
   if (!lineBuffer) return sum;
   char* buf = lineBuffer.get();
   while (true) {
-    int lineLen = readLine(file, buf, sizeof(buf));
+    int lineLen = readLine(file, buf, MAX_LINE_BYTES);
     if (lineLen == -2) continue;
     if (lineLen <= 0) break;
 
@@ -385,7 +386,7 @@ ReadingStatsSummary analyze(int maxDays, int64_t todayEpoch) {
     epochToYmd(startEpoch, y, m, d);
     int key = ymdKey(y, m, d);
 
-    daySeconds[key] += static_cast<int>(duration);
+    daySeconds[key] += duration;
   }
   file.close();
 
