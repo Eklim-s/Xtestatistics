@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -28,6 +29,16 @@ constexpr size_t MAX_LINE_BYTES = 512;
 
 constexpr size_t COPY_BUF_SIZE = 256;
 constexpr const char* STATS_TMP_FILE = "/ReadingStats/sessions.jsonl.tmp";
+constexpr const char* SUMMARY_FILE = "/ReadingStats/summary.json";
+constexpr const char* SUMMARY_TMP_FILE = "/ReadingStats/summary.json.tmp";
+
+struct AggregateSummary {
+  int64_t totalSeconds = 0;
+  int totalDays = 0;
+  int recordStreak = 0;
+  int currentStreak = 0;
+  int lastDay = 0;
+};
 
 bool appendJsonEscaped(char* out, size_t capacity, size_t& pos, const char* value) {
   if (!value) value = "";
@@ -96,6 +107,15 @@ bool writeAll(HalFile& file, const uint8_t* data, size_t length) {
 // Given a unix timestamp, pack into year/month/day using UTC-ish arithmetic.
 // Simple portable version that avoids <time.h> overhead on the read path.
 void epochToYmd(int64_t epoch, int& y, int& m, int& d) {
+  const time_t timestamp = static_cast<time_t>(epoch);
+  struct tm local{};
+  if (localtime_r(&timestamp, &local) != nullptr) {
+    y = local.tm_year + 1900;
+    m = local.tm_mon + 1;
+    d = local.tm_mday;
+    return;
+  }
+
   // Days since 1970-01-01
   int days = static_cast<int>(epoch / 86400);
   y = 1970;
@@ -141,9 +161,51 @@ int nextDayKey(int key) {
   return ymdKey(year, month, day);
 }
 
+void addSessionSeconds(std::map<int, int64_t>& daySeconds, int64_t startEpoch, int64_t endEpoch, int64_t duration) {
+  if (endEpoch <= startEpoch || endEpoch - startEpoch > 7 * 86400LL || duration > endEpoch - startEpoch) {
+    int y, m, d;
+    epochToYmd(startEpoch, y, m, d);
+    daySeconds[ymdKey(y, m, d)] += duration;
+    return;
+  }
+
+  const int64_t elapsed = endEpoch - startEpoch;
+  int64_t cursor = startEpoch;
+  int64_t consumed = 0;
+  int64_t allocated = 0;
+  while (cursor < endEpoch) {
+    int y, m, d;
+    epochToYmd(cursor, y, m, d);
+    const time_t cursorTime = static_cast<time_t>(cursor);
+    struct tm nextDay{};
+    if (localtime_r(&cursorTime, &nextDay) == nullptr) {
+      daySeconds[ymdKey(y, m, d)] += duration - allocated;
+      return;
+    }
+    nextDay.tm_hour = 0;
+    nextDay.tm_min = 0;
+    nextDay.tm_sec = 0;
+    nextDay.tm_mday++;
+    const int64_t boundary = static_cast<int64_t>(mktime(&nextDay));
+    const int64_t segmentEnd = boundary > cursor ? std::min(boundary, endEpoch) : endEpoch;
+    const int64_t segment = segmentEnd - cursor;
+    const int64_t nextAllocated = (duration * (consumed + segment)) / elapsed;
+    daySeconds[ymdKey(y, m, d)] += nextAllocated - allocated;
+    allocated = nextAllocated;
+    consumed += segment;
+    cursor = segmentEnd;
+  }
+  if (allocated < duration) {
+    int y, m, d;
+    epochToYmd(endEpoch - 1, y, m, d);
+    daySeconds[ymdKey(y, m, d)] += duration - allocated;
+  }
+}
+
 // Read one JSONL line from `file` starting at current position into `buf`.
-// Returns bytes read (excluding newline), 0 on EOF, -1 on error, or -2 when
-// the complete line was discarded because it did not fit in the buffer.
+// Returns bytes read (excluding newline), 0 on EOF, -1 on error, -2 when
+// the complete line was discarded because it did not fit in the buffer, or -3
+// for an empty line.
 int readLine(HalFile& file, char* buf, size_t bufSize) {
   if (!file || !file.isOpen() || !buf || bufSize == 0) return -1;
   size_t pos = 0;
@@ -154,7 +216,10 @@ int readLine(HalFile& file, char* buf, size_t bufSize) {
       if (pos == 0 && !tooLong) return 0;  // EOF at start
       break;
     }
-    if (c == '\n') break;
+    if (c == '\n') {
+      if (pos == 0 && !tooLong) return -3;
+      break;
+    }
     if (c == '\r') continue;  // skip standalone \r or \r before \n
     if (pos + 1 < bufSize && !tooLong) {
       buf[pos++] = static_cast<char>(c);
@@ -165,6 +230,49 @@ int readLine(HalFile& file, char* buf, size_t bufSize) {
   buf[pos] = '\0';
   if (tooLong) return -2;
   return static_cast<int>(pos);
+}
+
+bool jsonGetInt(const char* json, const char* key, int64_t& val);
+
+bool loadAggregate(AggregateSummary& summary) {
+  HalFile file = Storage.open(SUMMARY_FILE, O_RDONLY);
+  if (!file || !file.isOpen()) return false;
+  char line[192];
+  const int length = readLine(file, line, sizeof(line));
+  file.close();
+  if (length <= 0) return false;
+  int64_t days = 0, record = 0, current = 0, last = 0;
+  if (!jsonGetInt(line, "seconds", summary.totalSeconds) || !jsonGetInt(line, "days", days) ||
+      !jsonGetInt(line, "record", record) || !jsonGetInt(line, "current", current) || !jsonGetInt(line, "last", last))
+    return false;
+  const int64_t maxInt = std::numeric_limits<int>::max();
+  if (days < 0 || days > maxInt || record < 0 || record > maxInt || current < 0 || current > maxInt || last < 0 ||
+      last > maxInt)
+    return false;
+  summary.totalDays = static_cast<int>(days);
+  summary.recordStreak = static_cast<int>(record);
+  summary.currentStreak = static_cast<int>(current);
+  summary.lastDay = static_cast<int>(last);
+  return true;
+}
+
+bool saveAggregate(const AggregateSummary& summary) {
+  char line[192];
+  const int length =
+      snprintf(line, sizeof(line), "{\"seconds\":%lld,\"days\":%d,\"record\":%d,\"current\":%d,\"last\":%d}\n",
+               static_cast<long long>(summary.totalSeconds), summary.totalDays, summary.recordStreak,
+               summary.currentStreak, summary.lastDay);
+  if (length < 0 || static_cast<size_t>(length) >= sizeof(line)) return false;
+  HalFile file = Storage.open(SUMMARY_TMP_FILE, O_WRONLY | O_CREAT | O_TRUNC);
+  if (!file || !file.isOpen()) return false;
+  const bool written = writeAll(file, reinterpret_cast<const uint8_t*>(line), static_cast<size_t>(length));
+  file.flush();
+  const bool closed = file.close();
+  if (!written || !closed || !Storage.replaceFile(SUMMARY_TMP_FILE, SUMMARY_FILE)) {
+    Storage.remove(SUMMARY_TMP_FILE);
+    return false;
+  }
+  return true;
 }
 
 // Minimal JSON integer parser: reads the value of key "K" from an object.
@@ -261,6 +369,36 @@ bool appendSession(const char* bookPath, const char* document, int64_t startEpoc
   }
   linePos += static_cast<size_t>(suffixLength);
 
+  AggregateSummary aggregate;
+  if (!loadAggregate(aggregate)) {
+    const ReadingStatsSummary existing = analyze(0, endEpoch);
+    aggregate.totalSeconds = static_cast<int64_t>(existing.totalMinutes) * 60;
+    aggregate.totalDays = existing.totalDays;
+    aggregate.recordStreak = existing.recordStreakDays;
+    aggregate.currentStreak = existing.streakDays;
+    if (!existing.daily.empty()) {
+      const auto& last = existing.daily.back();
+      aggregate.lastDay = ymdKey(last.year, last.month, last.day);
+    }
+  }
+  auto updateAggregate = [&]() {
+    aggregate.totalSeconds += durationSeconds;
+    auto addDay = [&](int64_t epoch) {
+      int y, m, d;
+      epochToYmd(epoch, y, m, d);
+      const int key = ymdKey(y, m, d);
+      if (key == aggregate.lastDay) return;
+      aggregate.currentStreak =
+          aggregate.lastDay != 0 && key == nextDayKey(aggregate.lastDay) ? aggregate.currentStreak + 1 : 1;
+      aggregate.totalDays++;
+      aggregate.recordStreak = std::max(aggregate.recordStreak, aggregate.currentStreak);
+      aggregate.lastDay = key;
+    };
+    addDay(startEpoch);
+    if (endEpoch > startEpoch) addDay(endEpoch);
+    return saveAggregate(aggregate);
+  };
+
   HalFile file = Storage.open(STATS_FILE, O_WRONLY | O_CREAT | O_APPEND);
   if (!file || !file.isOpen()) {
     LOG_ERR("RDSTATS", "Cannot open %s for append", STATS_FILE);
@@ -334,6 +472,10 @@ bool appendSession(const char* bookPath, const char* document, int64_t startEpoc
       LOG_ERR("RDSTATS", "Cannot complete statistics trim");
       return false;
     }
+    if (!updateAggregate()) {
+      LOG_ERR("RDSTATS", "Cannot persist aggregate statistics");
+      return false;
+    }
     return true;
   }
 
@@ -356,6 +498,10 @@ bool appendSession(const char* bookPath, const char* document, int64_t startEpoc
     LOG_ERR("RDSTATS", "Cannot append statistics");
     return false;
   }
+  if (!updateAggregate()) {
+    LOG_ERR("RDSTATS", "Cannot persist aggregate statistics");
+    return false;
+  }
   return true;
 }
 
@@ -366,13 +512,15 @@ ReadingStatsSummary analyze(int maxDays, int64_t todayEpoch) {
 
   // Per-day minutes: ymdKey → total seconds → minutes at the end.
   std::map<int, int64_t> daySeconds;
+  AggregateSummary aggregate;
+  const bool haveAggregate = loadAggregate(aggregate);
 
   auto lineBuffer = makeUniqueNoThrow<char[]>(MAX_LINE_BYTES);
   if (!lineBuffer) return sum;
   char* buf = lineBuffer.get();
   while (true) {
     int lineLen = readLine(file, buf, MAX_LINE_BYTES);
-    if (lineLen == -2) continue;
+    if (lineLen == -2 || lineLen == -3) continue;
     if (lineLen <= 0) break;
 
     // Parse start time (epoch seconds) and duration.
@@ -382,15 +530,22 @@ ReadingStatsSummary analyze(int maxDays, int64_t todayEpoch) {
     if (!jsonGetInt(buf, "d", duration)) continue;
     if (duration <= 0 || duration > 86400) continue;  // sanity: max 24h
 
-    int y, m, d;
-    epochToYmd(startEpoch, y, m, d);
-    int key = ymdKey(y, m, d);
-
-    daySeconds[key] += duration;
+    int64_t endEpoch = 0;
+    jsonGetInt(buf, "e", endEpoch);
+    addSessionSeconds(daySeconds, startEpoch, endEpoch, duration);
   }
   file.close();
 
-  if (daySeconds.empty()) return sum;
+  if (daySeconds.empty()) {
+    if (haveAggregate) {
+      sum.totalMinutes = static_cast<int>(aggregate.totalSeconds / 60);
+      sum.totalDays = aggregate.totalDays;
+      sum.averageMinutes = sum.totalDays > 0 ? sum.totalMinutes / sum.totalDays : 0;
+      sum.streakDays = aggregate.currentStreak;
+      sum.recordStreakDays = aggregate.recordStreak;
+    }
+    return sum;
+  }
 
   // Convert per-day seconds → minutes, collect into daily vector.
   int todayY, todayM, todayD;
@@ -448,9 +603,10 @@ ReadingStatsSummary analyze(int maxDays, int64_t todayEpoch) {
     yesterdayKey = ymdKey(yy, ym, yd);
   }
 
-  // Current streak: walk backward from yesterday.
+  // Current streak includes today when today has reading; otherwise it ends yesterday.
   int streak = 0;
-  int cursor = yesterdayKey;
+  const auto todayIt = daySeconds.find(todayKey);
+  int cursor = todayIt != daySeconds.end() && todayIt->second > 0 ? todayKey : yesterdayKey;
   while (daySeconds.find(cursor) != daySeconds.end() && daySeconds[cursor] > 0) {
     streak++;
     // Move cursor back one day.
@@ -496,6 +652,14 @@ ReadingStatsSummary analyze(int maxDays, int64_t todayEpoch) {
   }
   if (run > record) record = run;
   sum.recordStreakDays = record;
+
+  if (haveAggregate) {
+    sum.totalMinutes = static_cast<int>(aggregate.totalSeconds / 60);
+    sum.totalDays = aggregate.totalDays;
+    sum.averageMinutes = sum.totalDays > 0 ? sum.totalMinutes / sum.totalDays : 0;
+    sum.streakDays = aggregate.currentStreak;
+    sum.recordStreakDays = aggregate.recordStreak;
+  }
 
   return sum;
 }

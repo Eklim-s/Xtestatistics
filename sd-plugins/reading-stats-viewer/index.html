@@ -136,9 +136,41 @@
   </div>
 </div>
 <script>
+function dayKey(date) {
+  return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' +
+    String(date.getDate()).padStart(2, '0');
+}
+
+function addSession(daySec, start, end, duration) {
+  if (!Number.isSafeInteger(end) || end <= start || duration > end - start || end - start > 7 * 86400) {
+    var startKey = dayKey(new Date(start * 1000));
+    daySec[startKey] = (daySec[startKey] || 0) + duration;
+    return;
+  }
+  var cursor = new Date(start * 1000), endMs = end * 1000;
+  var elapsed = end - start, consumed = 0, allocated = 0;
+  while (cursor.getTime() < endMs) {
+    var next = new Date(cursor);
+    next.setHours(24, 0, 0, 0);
+    var segmentEnd = Math.min(next.getTime(), endMs);
+    var segment = Math.max(1, Math.floor((segmentEnd - cursor.getTime()) / 1000));
+    var nextAllocated = Math.floor(duration * (consumed + segment) / elapsed);
+    var key = dayKey(cursor);
+    daySec[key] = (daySec[key] || 0) + nextAllocated - allocated;
+    allocated = nextAllocated;
+    consumed += segment;
+    cursor = new Date(segmentEnd);
+  }
+  if (allocated < duration) {
+    var lastKey = dayKey(new Date((end - 1) * 1000));
+    daySec[lastKey] = (daySec[lastKey] || 0) + duration - allocated;
+  }
+}
+
 (async function() {
   try {
     var resp = await fetch('/api/reading-stats');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     var text = await resp.text();
     var lines = text.trim().split('\n').filter(Boolean);
     if (lines.length === 0) {
@@ -150,9 +182,10 @@
       try {
         var obj = JSON.parse(line);
         var start = Number(obj && obj.s);
-        var duration = Number(obj && obj.d);
-        if (!obj || Array.isArray(obj) || typeof obj !== 'object' ||
-            !Number.isSafeInteger(start) || !Number.isSafeInteger(duration) ||
+         var end = Number(obj && obj.e);
+         var duration = Number(obj && obj.d);
+         if (!obj || Array.isArray(obj) || typeof obj !== 'object' ||
+             !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || !Number.isSafeInteger(duration) ||
             duration <= 0 || duration > 86400) return;
         sessions.push(obj);
       } catch(e) {}
@@ -171,33 +204,37 @@ function renderStats(sessions) {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('content').style.display = 'block';
 
-   var now = Math.floor(Date.now() / 1000);
-   var daySec = {}, bookMin = {}, totalSec = 0;
+    var now = new Date();
+    var daySec = {}, bookMin = {}, bookNames = {}, totalSec = 0;
   sessions.forEach(function(s) {
-    var dur = parseInt(s.d) || 0;
+    var dur = Number(s.d);
+    var start = Number(s.s), end = Number(s.e);
     totalSec += dur;
-    var d = new Date(parseInt(s.s) * 1000);
-    var key = d.getUTCFullYear() + '-' +
-              String(d.getUTCMonth()+1).padStart(2,'0') + '-' +
-              String(d.getUTCDate()).padStart(2,'0');
-     daySec[key] = (daySec[key] || 0) + dur;
-     var book = (s.b || 'Unknown').split('/').pop().replace(/\.\w+$/, '');
-     bookMin[book] = (bookMin[book] || 0) + dur;
+    addSession(daySec, start, end, dur);
+    var book = (s.b || 'Unknown').split('/').pop().replace(/\.\w+$/, '');
+    var bookKey = s.doc || s.b || 'Unknown';
+    bookMin[bookKey] = (bookMin[bookKey] || 0) + dur;
+    bookNames[bookKey] = book;
   });
 
    var totalMin = Math.floor(totalSec / 60);
    var days = Object.keys(daySec).sort();
 
   // Streak
-  var yesterday = new Date((now - 86400) * 1000);
-  var streak = 0, record = 0, run = 0;
-  var d = new Date(yesterday);
-  while (true) {
-    var key = d.getUTCFullYear() + '-' + String(d.getUTCMonth()+1).padStart(2,'0') + '-' + String(d.getUTCDate()).padStart(2,'0');
-     if (!daySec[key] || daySec[key] <= 0) break;
-    streak++;
-    d.setUTCDate(d.getUTCDate() - 1);
-  }
+   var streak = 0, record = 0, run = 0;
+   var d = new Date(now);
+   while (daySec[dayKey(d)] > 0) {
+     streak++;
+     d.setDate(d.getDate() - 1);
+   }
+   if (streak === 0) {
+     d = new Date(now);
+     d.setDate(d.getDate() - 1);
+     while (daySec[dayKey(d)] > 0) {
+       streak++;
+       d.setDate(d.getDate() - 1);
+     }
+   }
   // Record streak
   var allDays = days.slice();
   var prev = null;
@@ -217,7 +254,7 @@ function renderStats(sessions) {
   document.getElementById('record-num').textContent = record;
 
   // Stat boxes
-  var todayKey = new Date(now * 1000).toISOString().slice(0,10);
+   var todayKey = dayKey(now);
    var todayMin = Math.floor((daySec[todayKey] || 0) / 60);
    var avgMin = days.length ? Math.floor(totalMin / days.length) : 0;
   var stats = [
@@ -236,9 +273,9 @@ function renderStats(sessions) {
   var d7 = new Date(now * 1000);
   for (var i = 6; i >= 0; i--) {
     var dd = new Date(d7);
-    dd.setUTCDate(dd.getUTCDate() - i);
-    var k = dd.toISOString().slice(0,10);
-     last7.push({day: dd.getUTCDate(), label: ['S','M','T','W','T','F','S'][dd.getUTCDay()], min: Math.floor((daySec[k] || 0) / 60)});
+     dd.setDate(dd.getDate() - i);
+     var k = dayKey(dd);
+     last7.push({day: dd.getDate(), label: ['S','M','T','W','T','F','S'][dd.getDay()], min: Math.floor((daySec[k] || 0) / 60)});
   }
   var max7 = Math.max.apply(null, last7.map(function(x) { return x.min; })) || 1;
   var barHtml = last7.map(function(x) {
@@ -250,10 +287,8 @@ function renderStats(sessions) {
   document.getElementById('bar-chart').innerHTML = barHtml;
 
   // Calendar
-  var lastDay = days[days.length - 1];
-  var calDate = new Date(lastDay + 'T00:00:00Z');
-  var calYear = calDate.getUTCFullYear();
-  var calMonth = calDate.getUTCMonth();
+   var calYear = now.getFullYear();
+   var calMonth = now.getMonth();
   var daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
   var firstDow = new Date(calYear, calMonth, 1).getDay(); // 0=Sun
   var months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -291,7 +326,7 @@ function renderStats(sessions) {
     var h = Math.floor(mins / 60);
     var m = mins % 60;
     var time = h > 0 ? h + 'h ' + m + 'm' : m + 'm';
-     return '<div class="book-row"><span class="book-name">' + escapeHtml(b[0]) + '</span><span class="book-time">' + time + '</span></div>';
+     return '<div class="book-row"><span class="book-name">' + escapeHtml(bookNames[b[0]] || b[0]) + '</span><span class="book-time">' + time + '</span></div>';
   }).join('');
   document.getElementById('book-list').innerHTML = bookHtml || '<div class="no-data" style="padding:10px">No books recorded</div>';
 }

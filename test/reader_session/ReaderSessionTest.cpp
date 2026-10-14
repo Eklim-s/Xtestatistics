@@ -56,7 +56,7 @@ TEST(ReaderSession, CapsOneDwellAtThirtyMinutes) {
   turnAndRender(session, true, true, 3601000, 3700, 2000);
 
   EXPECT_EQ(session.durationSeconds(), 1800u);
-  EXPECT_EQ(session.endTime(), 1900);
+  EXPECT_EQ(session.endTime(), 3700);
 }
 
 TEST(ReaderSession, KeepsFirstEpochAndProgressAcrossContributions) {

@@ -127,6 +127,7 @@ void ReaderActivity::onExit() {
 void ReaderActivity::prepareForSleep() { flushReaderSession(); }
 
 void ReaderActivity::flushReaderSession() {
+  readerSession.finalize(millis(), trustedtime::trustedNow(), getProgressBasisPoints());
   if (!readerSession.isEmitWorthy()) {
     readerSession.reset();
     return;
@@ -137,13 +138,16 @@ void ReaderActivity::flushReaderSession() {
       document.size() == 32 && std::all_of(document.begin(), document.end(), [](const unsigned char c) {
         return std::isdigit(c) || (c >= 'a' && c <= 'f');
       });
-  if (validDocument) {
-    // Persist session to SD card for reading statistics.
-    ReadingStats::appendSession(bookPath.c_str(), document.c_str(),
-                                readerSession.startTime(), readerSession.endTime(),
-                                readerSession.durationSeconds(),
-                                readerSession.startProgressBp(), readerSession.endProgressBp());
+  if (!validDocument) LOG_ERR("READER", "Document ID unavailable; saving statistics without it");
+  const char* documentValue = validDocument ? document.c_str() : "";
+  if (!ReadingStats::appendSession(bookPath.c_str(), documentValue, readerSession.startTime(), readerSession.endTime(),
+                                   readerSession.durationSeconds(), readerSession.startProgressBp(),
+                                   readerSession.endProgressBp())) {
+    LOG_ERR("READER", "Could not persist reading session; keeping it for a later flush");
+    return;
+  }
 
+  if (validDocument) {
     if (pluginevents::anySubscriber(pluginevents::Event::ReaderSession)) {
       char startTime[24];
       char endTime[24];

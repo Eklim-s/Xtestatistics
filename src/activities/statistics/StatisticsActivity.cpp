@@ -2,6 +2,7 @@
 
 #include <HalDisplay.h>
 #include <I18n.h>
+#include <TrustedTime.h>
 
 #include <algorithm>
 #include <ctime>
@@ -16,7 +17,8 @@ void StatisticsActivity::onEnter() {
   screenH = renderer.getScreenHeight();
   contentW = screenW - 2 * MARGIN;
 
-  const int64_t now = static_cast<int64_t>(time(nullptr));
+  const int64_t trustedNow = trustedtime::trustedNow();
+  const int64_t now = trustedNow > 0 ? trustedNow : static_cast<int64_t>(time(nullptr));
   summary = ReadingStats::analyze(366, now);  // up to one year of daily data
   dataLoaded = true;
   requestUpdate();
@@ -109,16 +111,17 @@ int StatisticsActivity::drawWeekBars(int y) {
   int maxMins = 1;
   int dayLabels[7] = {0};
   int dayHeights[7] = {0};
-  const time_t now = time(nullptr);
+  const int64_t trustedNow = trustedtime::trustedNow();
+  const time_t now = static_cast<time_t>(trustedNow > 0 ? trustedNow : time(nullptr));
   for (int i = 0; i < 7; ++i) {
     const time_t dayEpoch = now - static_cast<time_t>(6 - i) * 86400;
-    const std::tm* day = gmtime(&dayEpoch);
-    if (!day) continue;
-    dayLabels[i] = day->tm_mday;
-    const int year = day->tm_year + 1900;
-    const int month = day->tm_mon + 1;
+    std::tm localDay{};
+    if (localtime_r(&dayEpoch, &localDay) == nullptr) continue;
+    dayLabels[i] = localDay.tm_mday;
+    const int year = localDay.tm_year + 1900;
+    const int month = localDay.tm_mon + 1;
     const auto entry = std::find_if(summary.daily.begin(), summary.daily.end(), [&](const DailyEntry& candidate) {
-      return candidate.year == year && candidate.month == month && candidate.day == day->tm_mday;
+      return candidate.year == year && candidate.month == month && candidate.day == localDay.tm_mday;
     });
     if (entry != summary.daily.end()) {
       maxMins = std::max(maxMins, entry->minutes);
@@ -128,8 +131,10 @@ int StatisticsActivity::drawWeekBars(int y) {
 
   for (int i = 0; i < 7; i++) {
     int x = MARGIN + i * (barW + 4) + 4;
-    int h = std::max(1, dayHeights[i] * barH / maxMins);
-    renderer.fillRect(x, barBaseY - h, barW, h, true);
+    if (dayHeights[i] > 0) {
+      const int h = std::max(1, dayHeights[i] * barH / maxMins);
+      renderer.fillRect(x, barBaseY - h, barW, h, true);
+    }
 
     // Day label under bar.
     char dayBuf[4];
@@ -151,10 +156,13 @@ int StatisticsActivity::drawMonthGrid(int y) {
     return y + lineH + 4;
   }
 
-  // Use the last month in data.
-  const auto& last = summary.daily.back();
-  int month = last.month;
-  int year = last.year;
+  // Show the current local month; days without data remain empty.
+  const int64_t trustedNow = trustedtime::trustedNow();
+  const time_t now = static_cast<time_t>(trustedNow > 0 ? trustedNow : time(nullptr));
+  std::tm current{};
+  if (localtime_r(&now, &current) == nullptr) return y;
+  int month = current.tm_mon + 1;
+  int year = current.tm_year + 1900;
 
   // Days in this month.
   static const int monthDays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};

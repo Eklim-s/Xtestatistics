@@ -14,11 +14,8 @@ CrossPoint.registerPlugin(function(container, api) {
   container.appendChild(streakEl);
 
   var todayEl = document.createElement('p');
-  todayEl.textContent = '';
   container.appendChild(todayEl);
-
   var totalEl = document.createElement('p');
-  totalEl.textContent = '';
   container.appendChild(totalEl);
 
   var link = document.createElement('a');
@@ -29,53 +26,91 @@ CrossPoint.registerPlugin(function(container, api) {
   link.style.color = '#2c3e50';
   container.appendChild(link);
 
-  // Fetch stats from the device API.
+  function dayKey(date) {
+    return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' +
+      String(date.getDate()).padStart(2, '0');
+  }
+
+  function addSession(daySeconds, start, end, duration) {
+    if (!Number.isSafeInteger(end) || end <= start || duration > end - start || end - start > 7 * 86400) {
+      var startDate = new Date(start * 1000);
+      var startKey = dayKey(startDate);
+      daySeconds[startKey] = (daySeconds[startKey] || 0) + duration;
+      return;
+    }
+    var cursor = new Date(start * 1000);
+    var endMs = end * 1000;
+    var elapsed = end - start;
+    var consumed = 0;
+    var allocated = 0;
+    while (cursor.getTime() < endMs) {
+      var next = new Date(cursor);
+      next.setHours(24, 0, 0, 0);
+      var segmentEnd = Math.min(next.getTime(), endMs);
+      var segment = Math.max(1, Math.floor((segmentEnd - cursor.getTime()) / 1000));
+      var nextAllocated = Math.floor(duration * (consumed + segment) / elapsed);
+      var key = dayKey(cursor);
+      daySeconds[key] = (daySeconds[key] || 0) + nextAllocated - allocated;
+      allocated = nextAllocated;
+      consumed += segment;
+      cursor = new Date(segmentEnd);
+    }
+    if (allocated < duration) {
+      var lastKey = dayKey(new Date((end - 1) * 1000));
+      daySeconds[lastKey] = (daySeconds[lastKey] || 0) + duration - allocated;
+    }
+  }
+
   fetch('/api/reading-stats')
-    .then(function(r) { return r.text(); })
+    .then(function(response) {
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      return response.text();
+    })
     .then(function(text) {
       var lines = text.trim().split('\n').filter(Boolean);
-       var daySeconds = {};
+      var daySeconds = {};
       var total = 0;
-      var now = Math.floor(Date.now() / 1000);
-
       lines.forEach(function(line) {
         try {
           var obj = JSON.parse(line);
-          var dur = parseInt(obj.d) || 0;
-          total += dur;
-          // Group by day (UTC date from epoch)
-          var date = new Date(parseInt(obj.s) * 1000);
-          var key = date.getUTCFullYear() + '-' +
-                    String(date.getUTCMonth() + 1).padStart(2, '0') + '-' +
-                    String(date.getUTCDate()).padStart(2, '0');
-           daySeconds[key] = (daySeconds[key] || 0) + dur;
+          var start = Number(obj && obj.s);
+          var end = Number(obj && obj.e);
+          var duration = Number(obj && obj.d);
+          if (!obj || Array.isArray(obj) || typeof obj !== 'object' ||
+              !Number.isSafeInteger(start) || !Number.isSafeInteger(end) ||
+              !Number.isSafeInteger(duration) || duration <= 0 || duration > 86400) return;
+          total += duration;
+          addSession(daySeconds, start, end, duration);
         } catch(e) {}
       });
-
-       var totalMin = Math.floor(total / 60);
-       var days = Object.keys(daySeconds).sort();
-
-      // Streak
-      var yesterday = new Date((now - 86400) * 1000);
-      var streak = 0;
-      var d = new Date(yesterday);
-      while (true) {
-        var key = d.getUTCFullYear() + '-' +
-                  String(d.getUTCMonth() + 1).padStart(2, '0') + '-' +
-                  String(d.getUTCDate()).padStart(2, '0');
-         if (!daySeconds[key] || daySeconds[key] <= 0) break;
-        streak++;
-        d.setUTCDate(d.getUTCDate() - 1);
+      var days = Object.keys(daySeconds).filter(function(key) { return daySeconds[key] > 0; }).sort();
+      if (days.length === 0) {
+        streakEl.textContent = 'No reading data yet.';
+        todayEl.textContent = '';
+        totalEl.textContent = '';
+        return;
       }
-
-      var todayKey = new Date(now * 1000).toISOString().slice(0, 10);
-       var today = Math.floor((daySeconds[todayKey] || 0) / 60);
-
-       streakEl.textContent = 'Streak: ' + streak + ' days';
-       todayEl.textContent = 'Today: ' + today + ' min';
-       totalEl.textContent = 'Total: ' + totalMin + ' min (' + days.length + ' days)';
+      var now = new Date();
+      var cursor = new Date(now);
+      var todayKey = dayKey(cursor);
+      var streak = 0;
+      while (daySeconds[dayKey(cursor)] > 0) {
+        streak++;
+        cursor.setDate(cursor.getDate() - 1);
+      }
+      if (streak === 0) {
+        cursor = new Date(now);
+        cursor.setDate(cursor.getDate() - 1);
+        while (daySeconds[dayKey(cursor)] > 0) {
+          streak++;
+          cursor.setDate(cursor.getDate() - 1);
+        }
+      }
+      streakEl.textContent = 'Streak: ' + streak + ' days';
+      todayEl.textContent = 'Today: ' + Math.floor((daySeconds[todayKey] || 0) / 60) + ' min';
+      totalEl.textContent = 'Total: ' + Math.floor(total / 60) + ' min (' + days.length + ' days)';
     })
-    .catch(function(err) {
+    .catch(function() {
       streakEl.textContent = 'Could not load stats.';
     });
 });

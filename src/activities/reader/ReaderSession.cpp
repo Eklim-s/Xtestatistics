@@ -25,6 +25,7 @@ void ReaderSession::onRenderComplete(const uint32_t monotonicMs, const int64_t t
         endProgress = anchorProgress;
       }
       duration += contribution;
+      endEpoch = trustedEpoch;
       endProgress = std::max(endProgress, progress);
     }
   }
@@ -36,10 +37,30 @@ void ReaderSession::onRenderComplete(const uint32_t monotonicMs, const int64_t t
   pendingForward = false;
 }
 
+void ReaderSession::finalize(const uint32_t monotonicMs, const int64_t trustedEpoch, const int progressBp) {
+  if (!hasAnchor || anchorEpoch <= 0 || trustedEpoch <= 0) return;
+  const uint32_t elapsedSeconds = (monotonicMs - anchorMs) / 1000;
+  if (elapsedSeconds < MIN_DWELL_SECONDS) return;
+
+  const uint32_t contribution = std::min(elapsedSeconds, MAX_DWELL_SECONDS);
+  if (duration == 0) {
+    startEpoch = anchorEpoch;
+    startProgress = anchorProgress;
+    endProgress = anchorProgress;
+  }
+  duration += contribution;
+  endEpoch = trustedEpoch;
+  endProgress = std::max(endProgress, clampProgress(progressBp));
+  anchorMs = monotonicMs;
+  anchorEpoch = trustedEpoch;
+  anchorProgress = clampProgress(progressBp);
+}
+
 void ReaderSession::reset() {
   anchorMs = 0;
   anchorEpoch = 0;
   startEpoch = 0;
+  endEpoch = 0;
   duration = 0;
   anchorProgress = 0;
   startProgress = 0;
