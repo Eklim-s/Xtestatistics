@@ -163,8 +163,8 @@ function renderStats(sessions) {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('content').style.display = 'block';
 
-  var now = Math.floor(Date.now() / 1000);
-  var dayMin = {}, bookMin = {}, totalSec = 0;
+   var now = Math.floor(Date.now() / 1000);
+   var daySec = {}, bookMin = {}, totalSec = 0;
   sessions.forEach(function(s) {
     var dur = parseInt(s.d) || 0;
     totalSec += dur;
@@ -172,13 +172,13 @@ function renderStats(sessions) {
     var key = d.getUTCFullYear() + '-' +
               String(d.getUTCMonth()+1).padStart(2,'0') + '-' +
               String(d.getUTCDate()).padStart(2,'0');
-    dayMin[key] = (dayMin[key] || 0) + Math.round(dur / 60);
-    var book = (s.b || 'Unknown').split('/').pop().replace(/\.\w+$/, '');
-    bookMin[book] = (bookMin[book] || 0) + Math.round(dur / 60);
+     daySec[key] = (daySec[key] || 0) + dur;
+     var book = (s.b || 'Unknown').split('/').pop().replace(/\.\w+$/, '');
+     bookMin[book] = (bookMin[book] || 0) + dur;
   });
 
-  var totalMin = Math.round(totalSec / 60);
-  var days = Object.keys(dayMin).sort();
+   var totalMin = Math.floor(totalSec / 60);
+   var days = Object.keys(daySec).sort();
 
   // Streak
   var yesterday = new Date((now - 86400) * 1000);
@@ -186,7 +186,7 @@ function renderStats(sessions) {
   var d = new Date(yesterday);
   while (true) {
     var key = d.getUTCFullYear() + '-' + String(d.getUTCMonth()+1).padStart(2,'0') + '-' + String(d.getUTCDate()).padStart(2,'0');
-    if (!dayMin[key] || dayMin[key] < 1) break;
+     if (!daySec[key] || daySec[key] <= 0) break;
     streak++;
     d.setUTCDate(d.getUTCDate() - 1);
   }
@@ -210,8 +210,8 @@ function renderStats(sessions) {
 
   // Stat boxes
   var todayKey = new Date(now * 1000).toISOString().slice(0,10);
-  var todayMin = dayMin[todayKey] || 0;
-  var avgMin = days.length ? Math.round(totalMin / days.length) : 0;
+   var todayMin = Math.floor((daySec[todayKey] || 0) / 60);
+   var avgMin = days.length ? Math.floor(totalMin / days.length) : 0;
   var stats = [
     {num: todayMin, lbl: 'Today (min)'},
     {num: totalMin, lbl: 'Total (min)'},
@@ -230,7 +230,7 @@ function renderStats(sessions) {
     var dd = new Date(d7);
     dd.setUTCDate(dd.getUTCDate() - i);
     var k = dd.toISOString().slice(0,10);
-    last7.push({day: dd.getUTCDate(), label: ['S','M','T','W','T','F','S'][dd.getUTCDay()], min: dayMin[k] || 0});
+     last7.push({day: dd.getUTCDate(), label: ['S','M','T','W','T','F','S'][dd.getUTCDay()], min: Math.floor((daySec[k] || 0) / 60)});
   }
   var max7 = Math.max.apply(null, last7.map(function(x) { return x.min; })) || 1;
   var barHtml = last7.map(function(x) {
@@ -259,7 +259,8 @@ function renderStats(sessions) {
   var maxCal = 1;
   for (var dd = 1; dd <= daysInMonth; dd++) {
     var k = calYear + '-' + String(calMonth+1).padStart(2,'0') + '-' + String(dd).padStart(2,'0');
-    if (dayMin[k] > maxCal) maxCal = dayMin[k];
+     var minutes = Math.floor((daySec[k] || 0) / 60);
+     if (minutes > maxCal) maxCal = minutes;
   }
 
   var calHtml = '';
@@ -267,7 +268,7 @@ function renderStats(sessions) {
   for (var i = 0; i < firstDow; i++) calHtml += '<div></div>';
   for (var dd = 1; dd <= daysInMonth; dd++) {
     var k = calYear + '-' + String(calMonth+1).padStart(2,'0') + '-' + String(dd).padStart(2,'0');
-    var m = dayMin[k] || 0;
+     var m = Math.floor((daySec[k] || 0) / 60);
     var intensity = m > 0 ? 0.2 + (m / maxCal) * 0.8 : 0;
     var bg = m > 0 ? 'rgba(46,204,113,' + intensity.toFixed(1) + ')' : 'transparent';
     calHtml += '<div class="cal-cell" style="background:' + bg + '" title="' + dd + ': ' + m + ' min">' +
@@ -278,13 +279,19 @@ function renderStats(sessions) {
   // Books
   var bookSort = Object.entries(bookMin).sort(function(a, b) { return b[1] - a[1]; });
   var bookHtml = bookSort.map(function(b) {
-    var mins = b[1];
+     var mins = Math.floor(b[1] / 60);
     var h = Math.floor(mins / 60);
     var m = mins % 60;
     var time = h > 0 ? h + 'h ' + m + 'm' : m + 'm';
-    return '<div class="book-row"><span class="book-name">' + b[0] + '</span><span class="book-time">' + time + '</span></div>';
+     return '<div class="book-row"><span class="book-name">' + escapeHtml(b[0]) + '</span><span class="book-time">' + time + '</span></div>';
   }).join('');
   document.getElementById('book-list').innerHTML = bookHtml || '<div class="no-data" style="padding:10px">No books recorded</div>';
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, function(ch) {
+    return {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[ch];
+  });
 }
 </script>
 </body>

@@ -2,6 +2,8 @@
 
 #include <HalDisplay.h>
 #include <I18n.h>
+
+#include <algorithm>
 #include <ctime>
 
 #include "components/UITheme.h"
@@ -99,28 +101,34 @@ int StatisticsActivity::drawWeekBars(int y) {
   renderer.drawText(SMALL_FONT_ID, MARGIN, y, tr(STR_STATS_LAST_7), true, EpdFontFamily::BOLD);
   y += lineH + 4;
 
-  // Last 7 days from daily list.
+  // Last 7 calendar days, including days without a reading session.
   const int barW = std::max(6, (contentW - 28) / 7 - 4);
   const int barH = std::max(20, screenH / 6);
   const int barBaseY = y + barH;
 
   int maxMins = 1;
-  int count = 0;
-  for (auto it = summary.daily.rbegin(); it != summary.daily.rend() && count < 7; ++it, ++count) {
-    if (it->minutes > maxMins) maxMins = it->minutes;
-  }
-
-  count = 0;
   int dayLabels[7] = {0};
   int dayHeights[7] = {0};
-  for (auto it = summary.daily.rbegin(); it != summary.daily.rend() && count < 7; ++it, ++count) {
-    dayLabels[6 - count] = it->day;
-    dayHeights[6 - count] = maxMins > 0 ? (it->minutes * barH / maxMins) : 0;
+  const time_t now = time(nullptr);
+  for (int i = 0; i < 7; ++i) {
+    const time_t dayEpoch = now - static_cast<time_t>(6 - i) * 86400;
+    const std::tm* day = gmtime(&dayEpoch);
+    if (!day) continue;
+    dayLabels[i] = day->tm_mday;
+    const int year = day->tm_year + 1900;
+    const int month = day->tm_mon + 1;
+    const auto entry = std::find_if(summary.daily.begin(), summary.daily.end(), [&](const DailyEntry& candidate) {
+      return candidate.year == year && candidate.month == month && candidate.day == day->tm_mday;
+    });
+    if (entry != summary.daily.end()) {
+      maxMins = std::max(maxMins, entry->minutes);
+      dayHeights[i] = entry->minutes;
+    }
   }
 
-  for (int i = 0; i < count; i++) {
+  for (int i = 0; i < 7; i++) {
     int x = MARGIN + i * (barW + 4) + 4;
-    int h = std::max(1, dayHeights[i]);
+    int h = std::max(1, dayHeights[i] * barH / maxMins);
     renderer.fillRect(x, barBaseY - h, barW, h, true);
 
     // Day label under bar.
@@ -168,7 +176,7 @@ int StatisticsActivity::drawMonthGrid(int y) {
   }
 
   // Month name header.
-  static const char* MONTH_NAMES[] = {"",     "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  static const char* MONTH_NAMES[] = {"",    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
   char titleBuf[32];
   snprintf(titleBuf, sizeof(titleBuf), "%s %d", MONTH_NAMES[month], year);

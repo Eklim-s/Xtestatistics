@@ -34,7 +34,7 @@ CrossPoint.registerPlugin(function(container, api) {
     .then(function(r) { return r.text(); })
     .then(function(text) {
       var lines = text.trim().split('\n').filter(Boolean);
-      var dayMinutes = {};
+       var daySeconds = {};
       var total = 0;
       var now = Math.floor(Date.now() / 1000);
 
@@ -48,12 +48,12 @@ CrossPoint.registerPlugin(function(container, api) {
           var key = date.getUTCFullYear() + '-' +
                     String(date.getUTCMonth() + 1).padStart(2, '0') + '-' +
                     String(date.getUTCDate()).padStart(2, '0');
-          dayMinutes[key] = (dayMinutes[key] || 0) + Math.round(dur / 60);
+           daySeconds[key] = (daySeconds[key] || 0) + dur;
         } catch(e) {}
       });
 
-      var totalMin = Math.round(total / 60);
-      var days = Object.keys(dayMinutes).sort();
+       var totalMin = Math.floor(total / 60);
+       var days = Object.keys(daySeconds).sort();
 
       // Streak
       var yesterday = new Date((now - 86400) * 1000);
@@ -63,17 +63,17 @@ CrossPoint.registerPlugin(function(container, api) {
         var key = d.getUTCFullYear() + '-' +
                   String(d.getUTCMonth() + 1).padStart(2, '0') + '-' +
                   String(d.getUTCDate()).padStart(2, '0');
-        if (!dayMinutes[key] || dayMinutes[key] < 1) break;
+         if (!daySeconds[key] || daySeconds[key] <= 0) break;
         streak++;
         d.setUTCDate(d.getUTCDate() - 1);
       }
 
       var todayKey = new Date(now * 1000).toISOString().slice(0, 10);
-      var today = dayMinutes[todayKey] || 0;
+       var today = Math.floor((daySeconds[todayKey] || 0) / 60);
 
-      streakEl.textContent = 'Streak: ' + streak + ' days';
-      todayEl.textContent = 'Today: ' + today + ' min';
-      totalEl.textContent = 'Total: ' + totalMin + ' min (' + days.length + ' days)';
+       streakEl.textContent = 'Streak: ' + streak + ' days';
+       todayEl.textContent = 'Today: ' + today + ' min';
+       totalEl.textContent = 'Total: ' + totalMin + ' min (' + days.length + ' days)';
     })
     .catch(function(err) {
       streakEl.textContent = 'Could not load stats.';
