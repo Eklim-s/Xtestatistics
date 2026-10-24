@@ -15,6 +15,7 @@
 #include <Memory.h>
 #include <ResumableFetch.h>
 #include <SecureHttpClient.h>
+#include <TrustedTime.h>
 #include <Util.h>
 #include <WiFi.h>
 #include <WolfsslCrypto.h>
@@ -46,6 +47,7 @@
 #include "html/RunnerPageHtml.generated.h"
 #include "html/SettingsPageHtml.generated.h"
 #include "html/js/jszip_minJs.generated.h"
+#include "reading_stats/ReadingStats.h"
 #include "util/BookCacheUtils.h"
 #include "util/DictionaryRegistry.h"
 #include "util/PluginHttp.h"
@@ -205,6 +207,7 @@ void CrossPointWebServer::begin() {
 
   server->on("/api/status", HTTP_GET, [this] { handleStatus(); });
   server->on("/api/reading-stats", HTTP_GET, [this] { handleReadingStats(); });
+  server->on("/api/reading-stats-summary", HTTP_GET, [this] { handleReadingStatsSummary(); });
   server->on("/api/files", HTTP_GET, [this] { handleFileListData(); });
   server->on("/download", HTTP_GET, [this] { handleDownload(); });
 
@@ -515,15 +518,30 @@ void CrossPointWebServer::handleNotFound() const {
 }
 
 void CrossPointWebServer::handleReadingStats() const {
+  server->sendHeader("Cache-Control", "no-store");
+  if (!ReadingStats::recoverPending()) {
+    server->send(503, "text/plain", "Statistics recovery pending");
+    return;
+  }
   const char* path = "/ReadingStats/sessions.jsonl";
   HalFile file = Storage.open(path, O_RDONLY);
   if (!file || !file.isOpen()) {
-    server->send(200, "application/x-ndjson", "");
+    server->send(Storage.exists(path) ? 503 : 200, "application/x-ndjson", "");
     return;
   }
   server->setContentLength(file.size());
   server->send(200, "application/x-ndjson", "");
   streamFileToClient(file);
+}
+
+void CrossPointWebServer::handleReadingStatsSummary() const {
+  server->sendHeader("Cache-Control", "no-store");
+  char summary[192];
+  if (!ReadingStats::readSummaryJson(summary, sizeof(summary), trustedtime::trustedNow())) {
+    server->send(503, "application/json", "{\"error\":\"Statistics unavailable\"}");
+    return;
+  }
+  server->send(200, "application/json", summary);
 }
 
 void CrossPointWebServer::handleStatus() const {

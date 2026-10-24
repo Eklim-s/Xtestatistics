@@ -54,6 +54,48 @@ Response:
 | `deviceId` | string | With `?plugin=<name>`: 64 hex chars, stable per device and plugin (SHA-256 of an on-device NVS secret and the name); omitted if NVS is unavailable |
 | `device` | string | `"X3"` or `"X4"` hardware detection |
 
+## Reading Statistics
+
+### `GET /api/reading-stats`
+
+Returns compatible session JSONL as `application/x-ndjson`. Each record contains
+`s`/`e` (Unix seconds), `d` (reading seconds), `b` (book path), `doc` (optional
+document ID), and `sb`/`eb` (progress in basis points). At approximately 1 MB,
+the oldest half of the detailed log is removed. An empty history returns an
+empty body, not a JSON array.
+
+### `GET /api/reading-stats-summary`
+
+Returns lifetime counters as `application/json`, or `{}` before the first
+summary has been created:
+
+```json
+{"seconds":600,"days":2,"record":2,"current":2,"last":20261024,"today":20261024,"yesterday":20261023}
+```
+
+`last` is the last reading date in device-local `YYYYMMDD` form. `current` is
+the streak ending on that date; clients must show zero unless `last` equals
+the response's `today` or `yesterday` device-local key. Daily charts and per-book totals cover only retained details;
+lifetime seconds, days, record, and average use the summary. Browser charts
+use the browser's local timezone and are labeled separately from the device
+streak. Stored lifetime dates retain the timezone used when recorded; changing
+the device timezone does not move historical dates retroactively.
+
+Both endpoints recover pending writes before responding, disable caching, and
+return HTTP 503 if storage recovery cannot finish. Clients must not treat that
+response as an empty history.
+
+The device keeps a write-ahead journal until both the session and its summary
+are installed. A streamed date index preserves distinct reading dates after
+trimming without loading lifetime dates into RAM. Existing sessions are not
+rewritten into a new record format. Old summaries without an index retain their
+counters, but dates already removed before migration cannot be reconstructed.
+Four failed reader exits may wait in RAM for a later reader/statistics/API
+operation. This fallback is lost on reboot/deep sleep and cannot protect an
+unlimited number of sessions while the card remains unavailable. Back up the
+whole `/ReadingStats` directory before changing firmware; do not delete journal
+or `.ready` files during recovery.
+
 ## File Management
 
 ### `GET /api/files`

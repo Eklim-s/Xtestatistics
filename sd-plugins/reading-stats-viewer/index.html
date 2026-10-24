@@ -117,7 +117,7 @@
 <div id="content" style="display:none">
   <div class="card" id="streak-card">
     <div class="streak"><span class="fire">🔥</span> <span id="streak-num">0</span> <span style="font-size:16px">days</span></div>
-    <div class="streak-sub">Record: <span id="record-num">0</span> days</div>
+    <div class="streak-sub">Device streak · Record: <span id="record-num">0</span> days</div>
   </div>
   <div class="stats-row" id="stats-row"></div>
   <div class="card" id="week-card">
@@ -125,7 +125,7 @@
     <div class="bar-chart" id="bar-chart"></div>
   </div>
   <div class="card">
-    <h3 style="font-size:14px;margin-bottom:8px;color:var(--muted);text-transform:uppercase">Calendar</h3>
+    <h3 style="font-size:14px;margin-bottom:8px;color:var(--muted);text-transform:uppercase">Calendar (browser local time)</h3>
     <div id="cal-header" style="display:flex;justify-content:center;gap:8px;margin-bottom:6px;font-weight:600"></div>
     <div class="dow" style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px"></div>
     <div class="cal-grid" id="cal-grid"></div>
@@ -139,6 +139,22 @@
 function dayKey(date) {
   return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' +
     String(date.getDate()).padStart(2, '0');
+}
+
+function validAggregate(value) {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return {};
+  return ['seconds', 'days', 'record', 'current', 'last'].every(function(key) {
+    return Number.isSafeInteger(value[key]) && value[key] >= 0;
+  }) && value.current <= value.record && value.record <= value.days ? value : {};
+}
+
+function aggregateStreak(aggregate, now, fallback) {
+  if (!Number.isSafeInteger(aggregate.last)) return fallback;
+  var yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  var today = Number.isSafeInteger(aggregate.today) ? aggregate.today : Number(dayKey(now).replace(/-/g, ''));
+  var previous = Number.isSafeInteger(aggregate.yesterday) ? aggregate.yesterday : Number(dayKey(yesterday).replace(/-/g, ''));
+  return aggregate.last === today || aggregate.last === previous ? aggregate.current : 0;
 }
 
 function addSession(daySec, start, end, duration) {
@@ -156,7 +172,8 @@ function addSession(daySec, start, end, duration) {
     var segment = Math.max(1, Math.floor((segmentEnd - cursor.getTime()) / 1000));
     var nextAllocated = Math.floor(duration * (consumed + segment) / elapsed);
     var key = dayKey(cursor);
-    daySec[key] = (daySec[key] || 0) + nextAllocated - allocated;
+    var contribution = nextAllocated - allocated;
+    if (contribution > 0) daySec[key] = (daySec[key] || 0) + contribution;
     allocated = nextAllocated;
     consumed += segment;
     cursor = new Date(segmentEnd);
@@ -169,14 +186,11 @@ function addSession(daySec, start, end, duration) {
 
 (async function() {
   try {
-    var resp = await fetch('/api/reading-stats');
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    var text = await resp.text();
+    var responses = await Promise.all([fetch('/api/reading-stats'), fetch('/api/reading-stats-summary')]);
+    responses.forEach(function(response) { if (!response.ok) throw new Error('HTTP ' + response.status); });
+    var text = await responses[0].text();
+    var aggregate = validAggregate(await responses[1].json());
     var lines = text.trim().split('\n').filter(Boolean);
-    if (lines.length === 0) {
-      document.getElementById('loading').innerHTML = '<div class="no-data">No reading data yet. Start reading on your device!</div>';
-      return;
-    }
     var sessions = [];
     lines.forEach(function(line) {
       try {
@@ -185,40 +199,44 @@ function addSession(daySec, start, end, duration) {
          var end = Number(obj && obj.e);
          var duration = Number(obj && obj.d);
          if (!obj || Array.isArray(obj) || typeof obj !== 'object' ||
-             !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || !Number.isSafeInteger(duration) ||
+              !Number.isSafeInteger(start) || start <= 0 || start > 253402300799 ||
+              !Number.isSafeInteger(end) || end < 0 || end > 253402300799 || !Number.isSafeInteger(duration) ||
             duration <= 0 || duration > 86400) return;
         sessions.push(obj);
       } catch(e) {}
     });
-    if (sessions.length === 0) {
+    if (sessions.length === 0 && !Number.isSafeInteger(Number(aggregate.seconds))) {
       document.getElementById('loading').innerHTML = '<div class="no-data">No reading data yet.</div>';
       return;
     }
-    renderStats(sessions);
+    renderStats(sessions, aggregate || {});
   } catch(e) {
     document.getElementById('loading').textContent = 'Error loading stats: ' + e.message;
   }
 })();
 
-function renderStats(sessions) {
+function renderStats(sessions, aggregate) {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('content').style.display = 'block';
 
     var now = new Date();
-    var daySec = {}, bookMin = {}, bookNames = {}, totalSec = 0;
+    var daySec = Object.create(null), bookMin = Object.create(null), bookNames = Object.create(null), totalSec = 0;
   sessions.forEach(function(s) {
     var dur = Number(s.d);
     var start = Number(s.s), end = Number(s.e);
     totalSec += dur;
     addSession(daySec, start, end, dur);
-    var book = (s.b || 'Unknown').split('/').pop().replace(/\.\w+$/, '');
-    var bookKey = s.doc || s.b || 'Unknown';
+    var path = typeof s.b === 'string' && s.b ? s.b : 'Unknown';
+    var book = path.split('/').pop().replace(/\.\w+$/, '');
+    var bookKey = typeof s.doc === 'string' && s.doc ? s.doc : path;
     bookMin[bookKey] = (bookMin[bookKey] || 0) + dur;
     bookNames[bookKey] = book;
   });
 
-   var totalMin = Math.floor(totalSec / 60);
-   var days = Object.keys(daySec).sort();
+   var aggregateSeconds = Number(aggregate.seconds);
+   var aggregateDays = Number(aggregate.days);
+   var totalMin = Number.isSafeInteger(aggregateSeconds) ? Math.floor(aggregateSeconds / 60) : Math.floor(totalSec / 60);
+   var days = Object.keys(daySec).filter(function(key) { return daySec[key] > 0; }).sort();
 
   // Streak
    var streak = 0, record = 0, run = 0;
@@ -250,18 +268,20 @@ function renderStats(sessions) {
   });
   if (run > record) record = run;
 
-  document.getElementById('streak-num').textContent = streak;
-  document.getElementById('record-num').textContent = record;
+   streak = aggregateStreak(aggregate, now, streak);
+   document.getElementById('streak-num').textContent = streak;
+   document.getElementById('record-num').textContent = Number.isSafeInteger(Number(aggregate.record)) ? Number(aggregate.record) : record;
 
   // Stat boxes
    var todayKey = dayKey(now);
    var todayMin = Math.floor((daySec[todayKey] || 0) / 60);
-   var avgMin = days.length ? Math.floor(totalMin / days.length) : 0;
+   var totalDays = Number.isSafeInteger(aggregateDays) ? aggregateDays : days.length;
+   var avgMin = totalDays ? Math.floor(totalMin / totalDays) : 0;
   var stats = [
     {num: todayMin, lbl: 'Today (min)'},
     {num: totalMin, lbl: 'Total (min)'},
     {num: avgMin, lbl: 'Avg/day (min)'},
-    {num: days.length, lbl: 'Days read'}
+     {num: Number.isSafeInteger(aggregateDays) ? aggregateDays : days.length, lbl: 'Days read'}
   ];
   var row = document.getElementById('stats-row');
   row.innerHTML = stats.map(function(s) {
@@ -270,7 +290,7 @@ function renderStats(sessions) {
 
   // Bar chart
   var last7 = [];
-  var d7 = new Date(now * 1000);
+   var d7 = new Date(now);
   for (var i = 6; i >= 0; i--) {
     var dd = new Date(d7);
      dd.setDate(dd.getDate() - i);
@@ -281,7 +301,7 @@ function renderStats(sessions) {
   var barHtml = last7.map(function(x) {
     var h = Math.round(x.min / max7 * 90);
     return '<div class="bar-col"><div style="font-size:10px;color:var(--muted);margin-bottom:2px">' + x.min + '</div>' +
-           '<div class="bar" style="height:' + (h || 2) + 'px" title="' + x.min + ' min"></div>' +
+           '<div class="bar" style="height:' + h + 'px" title="' + x.min + ' min"></div>' +
            '<div class="bar-label">' + x.day + '/' + x.label + '</div></div>';
   }).join('');
   document.getElementById('bar-chart').innerHTML = barHtml;

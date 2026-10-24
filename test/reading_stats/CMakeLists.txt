@@ -1,0 +1,8 @@
+add_executable(ReadingStatsTest ReadingStatsTest.cpp ${REPO_ROOT}/src/reading_stats/ReadingStats.cpp)
+target_include_directories(ReadingStatsTest PRIVATE stubs ${REPO_ROOT}/lib/Memory)
+target_link_libraries(ReadingStatsTest PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(ReadingStatsTest)
+find_program(NODE_EXECUTABLE node)
+if(NODE_EXECUTABLE)
+  add_test(NAME ReadingStatsViewer COMMAND ${NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/viewer.test.cjs)
+endif()

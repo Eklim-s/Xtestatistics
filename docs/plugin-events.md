@@ -66,7 +66,7 @@ All values are strings in the event's `vars` object:
 | `book` | SD path |
 | `document` | binary KOSync partial-MD5, exactly 32 lowercase hex characters |
 | `start_time` | trusted Unix epoch at the start of the first counted dwell |
-| `end_time` | compact active end, exactly `start_time + duration_seconds` |
+| `end_time` | trusted wall-clock time of the last contributing interaction |
 | `duration_seconds` | sum of counted active dwell seconds |
 | `start_progress_bp` | first counted whole-book progress, 0..10000 basis points |
 | `end_progress_bp` | monotonic-clamped final progress, 0..10000 basis points |
@@ -78,17 +78,23 @@ seconds. Reverse turns, chapter skips, failed turns, and shorter displays are
 excluded and re-anchor the timer. At least 10 active seconds and a trustworthy
 positive start time are required. EPUB retains basis-point precision; TXT/XTC
 may report whole-percent steps. The document hash is calculated lazily only
-when an emit-worthy summary and a subscriber both exist.
+when an emit-worthy summary needs local persistence, even without subscribers.
 
-`end_time` is deliberately not the wall-clock time of the last interaction.
-Idle gaps are removed, so it always equals `start_time + duration_seconds` and
-is greater than `start_time` for every emitted session. The envelope
-`event.ts` remains the actual emission time.
+`end_time` is the trusted wall-clock time of the last contributing interaction,
+including finalization of the last rendered page. It need not equal
+`start_time + duration_seconds`: active reading excludes skipped intervals and
+caps a single dwell at 30 minutes. The envelope `event.ts` is the emission time.
 
 The pre-sleep activity hook queues and resets this event immediately before
 `sleep.enter` and the sleep drain. Normal reader teardown calls the same
 idempotent flush as a fallback, so direct-from-reader sleep queues it exactly
 once and can deliver it on that same sleep.
+
+If persistence fails during reader exit, up to four sessions can wait in RAM.
+Later reader, statistics, or statistics-API operations retry them and emit
+`reader.session` after durable acceptance. This can occur after `reader.exit`;
+use session timestamps rather than event order. RAM-only sessions are lost on
+reboot/deep sleep, and an unavailable card can also prevent event-outbox writes.
 
 A generic consumer can expand one summary into two distinct points without
 firmware knowing the destination schema:
@@ -100,7 +106,7 @@ firmware knowing the destination schema:
 ]
 ```
 
-The distinct compact timestamps avoid a uniqueness collision even when the
+The distinct timestamps avoid a uniqueness collision even when the
 two progress values are equal. Preserve at-least-once delivery and deduplicate
 replayed points by the consumer's natural document/time key.
 

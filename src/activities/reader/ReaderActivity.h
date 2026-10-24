@@ -63,7 +63,7 @@ class ReaderActivity : public Activity {
   void clearEndOfBookOptionsIfNeeded();
   void disableFastInitialRefresh();
   void notePageTurn(bool forward, bool succeeded);
-  void flushReaderSession();
+  void flushReaderSession(bool leaving = false);
 
  public:
   ~ReaderActivity() override = default;

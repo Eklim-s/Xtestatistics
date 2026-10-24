@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
@@ -20,6 +21,28 @@
 #include "XtcReaderActivity.h"
 #include "reading_stats/ReadingStats.h"
 #include "util/PluginEvents.h"
+
+namespace {
+void emitReaderSession(const char* book, const char* document, int64_t start, int64_t end, uint32_t seconds,
+                       uint16_t startBp, uint16_t endBp) {
+  if (!document || strlen(document) != 32 || !pluginevents::anySubscriber(pluginevents::Event::ReaderSession)) return;
+  char startTime[24], endTime[24], duration[16], startProgress[8], endProgress[8];
+  snprintf(startTime, sizeof(startTime), "%lld", static_cast<long long>(start));
+  snprintf(endTime, sizeof(endTime), "%lld", static_cast<long long>(end));
+  snprintf(duration, sizeof(duration), "%lu", static_cast<unsigned long>(seconds));
+  snprintf(startProgress, sizeof(startProgress), "%u", startBp);
+  snprintf(endProgress, sizeof(endProgress), "%u", endBp);
+  const pluginevents::Var vars[] = {{"book", book},
+                                    {"document", document},
+                                    {"start_time", startTime},
+                                    {"end_time", endTime},
+                                    {"duration_seconds", duration},
+                                    {"start_progress_bp", startProgress},
+                                    {"end_progress_bp", endProgress},
+                                    {"progress_scale", "10000"}};
+  pluginevents::emit(pluginevents::Event::ReaderSession, vars, 8);
+}
+}  // namespace
 
 ReaderActivity::ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
                                std::string bookPath, const bool allowFastInitialRefresh)
@@ -56,6 +79,7 @@ void ReaderActivity::notePageTurn(const bool forward, const bool succeeded) {
 }
 
 void ReaderActivity::onEnter() {
+  ReadingStats::retryDeferred();
   Activity::onEnter();
 
   // Heap ledger for field crash reports: free vs largest block distinguishes a
@@ -105,9 +129,8 @@ void ReaderActivity::onExit() {
 
   LOG_INF("MEM", "reader exit: free=%u max_block=%u", (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 
-  // Flush BEFORE the ReaderExit event: the session's final progress must be
-  // durable before a subscriber can act on the exit notification.
-  flushReaderSession();
+  // Attempt persistence before ReaderExit; SD failures may defer the session in RAM.
+  flushReaderSession(true);
 
   if (pluginevents::anySubscriber(pluginevents::Event::ReaderExit)) {
     char percent[8];
@@ -126,7 +149,8 @@ void ReaderActivity::onExit() {
 
 void ReaderActivity::prepareForSleep() { flushReaderSession(); }
 
-void ReaderActivity::flushReaderSession() {
+void ReaderActivity::flushReaderSession(bool leaving) {
+  ReadingStats::retryDeferred();
   readerSession.finalize(millis(), trustedtime::trustedNow(), getProgressBasisPoints());
   if (!readerSession.isEmitWorthy()) {
     readerSession.reset();
@@ -143,29 +167,20 @@ void ReaderActivity::flushReaderSession() {
   if (!ReadingStats::appendSession(bookPath.c_str(), documentValue, readerSession.startTime(), readerSession.endTime(),
                                    readerSession.durationSeconds(), readerSession.startProgressBp(),
                                    readerSession.endProgressBp())) {
-    LOG_ERR("READER", "Could not persist reading session; keeping it for a later flush");
+    if (leaving &&
+        ReadingStats::deferSession(bookPath.c_str(), documentValue, readerSession.startTime(), readerSession.endTime(),
+                                   readerSession.durationSeconds(), readerSession.startProgressBp(),
+                                   readerSession.endProgressBp(), emitReaderSession)) {
+      LOG_ERR("READER", "Session deferred in RAM until storage recovers");
+      readerSession.reset();
+      return;
+    }
+    LOG_ERR("READER", "Could not persist reading session; no durable copy");
     return;
   }
 
-  if (validDocument) {
-    if (pluginevents::anySubscriber(pluginevents::Event::ReaderSession)) {
-      char startTime[24];
-      char endTime[24];
-      char duration[16];
-      char startProgress[8];
-      char endProgress[8];
-      snprintf(startTime, sizeof(startTime), "%lld", static_cast<long long>(readerSession.startTime()));
-      snprintf(endTime, sizeof(endTime), "%lld", static_cast<long long>(readerSession.endTime()));
-      snprintf(duration, sizeof(duration), "%lu", static_cast<unsigned long>(readerSession.durationSeconds()));
-      snprintf(startProgress, sizeof(startProgress), "%u", readerSession.startProgressBp());
-      snprintf(endProgress, sizeof(endProgress), "%u", readerSession.endProgressBp());
-      const pluginevents::Var vars[] = {{"book", bookPath.c_str()},       {"document", document.c_str()},
-                                        {"start_time", startTime},        {"end_time", endTime},
-                                        {"duration_seconds", duration},   {"start_progress_bp", startProgress},
-                                        {"end_progress_bp", endProgress}, {"progress_scale", "10000"}};
-      pluginevents::emit(pluginevents::Event::ReaderSession, vars, 8);
-    }
-  }
+  emitReaderSession(bookPath.c_str(), documentValue, readerSession.startTime(), readerSession.endTime(),
+                    readerSession.durationSeconds(), readerSession.startProgressBp(), readerSession.endProgressBp());
   readerSession.reset();
 }
 

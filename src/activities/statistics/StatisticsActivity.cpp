@@ -113,8 +113,13 @@ int StatisticsActivity::drawWeekBars(int y) {
   int dayHeights[7] = {0};
   const int64_t trustedNow = trustedtime::trustedNow();
   const time_t now = static_cast<time_t>(trustedNow > 0 ? trustedNow : time(nullptr));
+  std::tm baseDay{};
+  if (localtime_r(&now, &baseDay) == nullptr) return barBaseY + renderer.getLineHeight(SMALL_FONT_ID) + 10;
   for (int i = 0; i < 7; ++i) {
-    const time_t dayEpoch = now - static_cast<time_t>(6 - i) * 86400;
+    std::tm targetDay = baseDay;
+    targetDay.tm_mday -= 6 - i;
+    targetDay.tm_isdst = -1;
+    const time_t dayEpoch = mktime(&targetDay);
     std::tm localDay{};
     if (localtime_r(&dayEpoch, &localDay) == nullptr) continue;
     dayLabels[i] = localDay.tm_mday;

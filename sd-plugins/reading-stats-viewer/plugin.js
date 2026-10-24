@@ -31,6 +31,13 @@ CrossPoint.registerPlugin(function(container, api) {
       String(date.getDate()).padStart(2, '0');
   }
 
+  function validAggregate(value) {
+    if (!value || Array.isArray(value) || typeof value !== 'object') return {};
+    return ['seconds', 'days', 'record', 'current', 'last'].every(function(key) {
+      return Number.isSafeInteger(value[key]) && value[key] >= 0;
+    }) && value.current <= value.record && value.record <= value.days ? value : {};
+  }
+
   function addSession(daySeconds, start, end, duration) {
     if (!Number.isSafeInteger(end) || end <= start || duration > end - start || end - start > 7 * 86400) {
       var startDate = new Date(start * 1000);
@@ -50,7 +57,8 @@ CrossPoint.registerPlugin(function(container, api) {
       var segment = Math.max(1, Math.floor((segmentEnd - cursor.getTime()) / 1000));
       var nextAllocated = Math.floor(duration * (consumed + segment) / elapsed);
       var key = dayKey(cursor);
-      daySeconds[key] = (daySeconds[key] || 0) + nextAllocated - allocated;
+      var contribution = nextAllocated - allocated;
+      if (contribution > 0) daySeconds[key] = (daySeconds[key] || 0) + contribution;
       allocated = nextAllocated;
       consumed += segment;
       cursor = new Date(segmentEnd);
@@ -61,14 +69,18 @@ CrossPoint.registerPlugin(function(container, api) {
     }
   }
 
-  fetch('/api/reading-stats')
-    .then(function(response) {
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      return response.text();
+  Promise.all([fetch('/api/reading-stats'), fetch('/api/reading-stats-summary')])
+    .then(function(responses) {
+      responses.forEach(function(response) {
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+      });
+      return Promise.all([responses[0].text(), responses[1].json()]);
     })
-    .then(function(text) {
+    .then(function(payload) {
+      var text = payload[0];
+      var aggregate = validAggregate(payload[1]);
       var lines = text.trim().split('\n').filter(Boolean);
-      var daySeconds = {};
+      var daySeconds = Object.create(null);
       var total = 0;
       lines.forEach(function(line) {
         try {
@@ -77,14 +89,15 @@ CrossPoint.registerPlugin(function(container, api) {
           var end = Number(obj && obj.e);
           var duration = Number(obj && obj.d);
           if (!obj || Array.isArray(obj) || typeof obj !== 'object' ||
-              !Number.isSafeInteger(start) || !Number.isSafeInteger(end) ||
+               !Number.isSafeInteger(start) || start <= 0 || start > 253402300799 ||
+               !Number.isSafeInteger(end) || end < 0 || end > 253402300799 ||
               !Number.isSafeInteger(duration) || duration <= 0 || duration > 86400) return;
           total += duration;
           addSession(daySeconds, start, end, duration);
         } catch(e) {}
       });
       var days = Object.keys(daySeconds).filter(function(key) { return daySeconds[key] > 0; }).sort();
-      if (days.length === 0) {
+      if (days.length === 0 && !Number.isSafeInteger(Number(aggregate.seconds))) {
         streakEl.textContent = 'No reading data yet.';
         todayEl.textContent = '';
         totalEl.textContent = '';
@@ -106,9 +119,18 @@ CrossPoint.registerPlugin(function(container, api) {
           cursor.setDate(cursor.getDate() - 1);
         }
       }
-      streakEl.textContent = 'Streak: ' + streak + ' days';
+      if (Number.isSafeInteger(aggregate.last)) {
+        var yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        var today = Number.isSafeInteger(aggregate.today) ? aggregate.today : Number(dayKey(now).replace(/-/g, ''));
+        var previous = Number.isSafeInteger(aggregate.yesterday) ? aggregate.yesterday : Number(dayKey(yesterday).replace(/-/g, ''));
+        streak = aggregate.last === today || aggregate.last === previous ? aggregate.current : 0;
+      }
+      streakEl.textContent = 'Device streak: ' + streak + ' days';
       todayEl.textContent = 'Today: ' + Math.floor((daySeconds[todayKey] || 0) / 60) + ' min';
-      totalEl.textContent = 'Total: ' + Math.floor(total / 60) + ' min (' + days.length + ' days)';
+      var aggregateTotal = Number.isSafeInteger(Number(aggregate.seconds)) ? Number(aggregate.seconds) : total;
+      var aggregateDays = Number.isSafeInteger(Number(aggregate.days)) ? Number(aggregate.days) : days.length;
+      totalEl.textContent = 'Total: ' + Math.floor(aggregateTotal / 60) + ' min (' + aggregateDays + ' days)';
     })
     .catch(function() {
       streakEl.textContent = 'Could not load stats.';

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -13,7 +14,7 @@ struct DailyEntry {
 };
 
 struct ReadingStatsSummary {
-  int streakDays = 0;        // current consecutive days (ending yesterday)
+  int streakDays = 0;        // current consecutive days through today or yesterday
   int recordStreakDays = 0;  // all-time best streak
   int todayMinutes = 0;
   int totalMinutes = 0;
@@ -27,7 +28,20 @@ namespace ReadingStats {
 // Whether the stats directory and file exist.
 bool exists();
 
-// Append one reading session as a JSONL line. Returns false on storage errors.
+// Finish any journaled append before exposing either API view. False means retry later.
+bool recoverPending();
+bool readSummaryJson(char* buffer, size_t capacity, int64_t todayEpoch = 0);
+
+// Bounded RAM fallback for failed reader exits; not retained across reboot or deep sleep.
+using SessionCompletion = void (*)(const char*, const char*, int64_t, int64_t, uint32_t, uint16_t, uint16_t);
+// Completion must not depend on an activity instance; it runs after ownership becomes durable.
+bool deferSession(const char* bookPath, const char* document, int64_t startEpoch, int64_t endEpoch,
+                  uint32_t durationSeconds, uint16_t startProgressBp, uint16_t endProgressBp,
+                  SessionCompletion onSaved = nullptr);
+void retryDeferred();
+
+// True transfers ownership to a durable journal, even if applying it is deferred.
+// False leaves ownership with the caller. Exact retries of the last record are harmless.
 // Clamps the file at ~1 MB by dropping the oldest half of lines.
 bool appendSession(const char* bookPath, const char* document, int64_t startEpoch, int64_t endEpoch,
                    uint32_t durationSeconds, uint16_t startProgressBp, uint16_t endProgressBp);
