@@ -14,6 +14,7 @@ struct DailyEntry {
 };
 
 struct ReadingStatsSummary {
+  bool available = false;    // false on recovery, aggregate, or history read failure
   int streakDays = 0;        // current consecutive days through today or yesterday
   int recordStreakDays = 0;  // all-time best streak
   int todayMinutes = 0;

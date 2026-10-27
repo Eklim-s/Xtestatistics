@@ -14,7 +14,25 @@ A fork of [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-re
 
 ## Installation
 
+### Clock and reading days
+
+On RTC-equipped devices, startup restores system UTC from a valid hardware
+clock before applying the saved TrustedTime floor. Clock settings show the
+local date as `YYYY-MM-DD`; changing timezone also changes this date near
+midnight. Use clock synchronization over Wi-Fi if the date is wrong or unset.
+The RTC calendar range accepted by the firmware is 2025–2099.
+
+If the system clock steps backwards during reading, elapsed reading seconds
+are retained using the monotonic timer and the session endpoint advances from
+its last anchor. Dates cannot be reconstructed exactly while the clock is wrong.
+EPUB page-load error screens do not contribute reading dwell. If statistics
+cannot be read, the device shows a read error instead of zero or partial totals;
+reopen Statistics after storage becomes available to retry.
+
 ### 1. Build the firmware
+
+Follow the [toolchain setup guide](docs/contributing/getting-started.md#first-time-toolchain-setup)
+for Python, the pinned pioarduino Core, and its compatibility helper before building.
 
 ```bash
 git clone --recursive https://github.com/Eklim-s/Xtestatistics
@@ -63,6 +81,9 @@ Sessions are stored at `/ReadingStats/sessions.jsonl` on the SD card, one JSON o
 | `sb` | Start progress in basis points (0–10000) |
 | `eb` | End progress in basis points (0–10000) |
 
+Lifetime totals, reading-day counts, and streak records survive compaction of
+the detailed session log. Calendar and per-book details may cover a shorter period.
+
 ## Upstream updates
 
 This fork tracks CrossPoint Reader's `develop` branch. To merge upstream changes:
@@ -75,16 +96,8 @@ git merge upstream/develop
 
 ## Building from scratch
 
-Requirements:
-- Python 3.8+
-- [PlatformIO Core](https://platformio.org/) (`pip install platformio`)
-- `clang-format` 21 (optional, for code formatting)
-
-```bash
-git clone --recursive https://github.com/Eklim-s/Xtestatistics
-cd Xtestatistics
-pio run -e default
-```
+Follow [Getting Started](docs/contributing/getting-started.md) for the supported
+Python version, pinned tools, setup commands, and board-specific build targets.
 
 The compiled firmware is at `.pio/build/default/firmware.bin`.
 

@@ -77,14 +77,15 @@ dependency; they are not steps to repeat before each build.
 ## First-time toolchain setup
 
 Use the pioarduino Core revision installed by
-[CI](../../.github/workflows/ci.yml), together with the platform pinned in
+[CI](../../.github/workflows/build.yml), together with the platform pinned in
 `platformio.ini`. On Linux or macOS, install the core in the ignored local
 virtual environment:
 
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install --upgrade 'https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip'
+python -m pip install --upgrade 'pioarduino==6.2.0.post1'
+python scripts/patch_pioarduino_core_version.py
 pio --version
 ```
 
@@ -99,13 +100,15 @@ nested core environment. Pin that core too before the first build, as CI does:
 ```sh
 python -m pip install uv
 pio pkg install -e default
-uv pip install --python ~/.platformio/penv/bin/python 'pioarduino==6.1.19'
+uv pip install --python ~/.platformio/penv/bin/python 'pioarduino==6.2.0.post1'
+~/.platformio/penv/bin/python scripts/patch_pioarduino_core_version.py
 ```
 
 Replace `default` with the selected profile. The nested Python path above uses
 the default Linux/macOS PlatformIO directory; on Windows use
 `~/.platformio/penv/Scripts/python.exe`, or the configured core directory.
-Keep both core pins aligned with CI when updating the toolchain. After setup,
+Keep both core pins aligned with CI when updating the toolchain. The patch helper
+normalizes post-release version comparisons; it does not change the installed version. After setup,
 use the [normal build command](#build).
 
 ## Flash

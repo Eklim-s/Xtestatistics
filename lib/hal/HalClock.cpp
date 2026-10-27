@@ -3,16 +3,22 @@
 #include <Logging.h>
 #include <WiFi.h>
 #include <esp_sntp.h>
+#include <sys/time.h>
 #include <time.h>
 
 HalClock halClock;  // Singleton instance
 
-void HalClock::begin() {
-  _available = _sdkRtc.begin();
-  LOG_INF("CLK", _available ? "SDK RTC found" : "RTC not found");
+namespace {
+bool validDateTime(const Rtc::DateTime& dt) {
+  // RTC drivers encode only two year digits; reject unset dates and bad registers.
+  if (dt.year < 2025 || dt.year > 2099 || dt.month < 1 || dt.month > 12 || dt.hour > 23 || dt.minute > 59 ||
+      dt.second > 59)
+    return false;
+  constexpr uint8_t days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  const bool leap = dt.year % 4 == 0 && (dt.year % 100 != 0 || dt.year % 400 == 0);
+  return dt.day >= 1 && dt.day <= days[dt.month - 1] + (dt.month == 2 && leap ? 1 : 0);
 }
 
-namespace {
 // UTC calendar date -> Unix epoch, no timezone involvement (newlib has no
 // timegm). Days-from-civil per Howard Hinnant's algorithm.
 time_t epochFromUtc(const Rtc::DateTime& dt) {
@@ -28,6 +34,21 @@ time_t epochFromUtc(const Rtc::DateTime& dt) {
 }
 }  // namespace
 
+void HalClock::begin() {
+  _available = _sdkRtc.begin();
+  _hasCachedTime = false;
+  _lastPollMs = 0;
+  LOG_INF("CLK", _available ? "SDK RTC found" : "RTC not found");
+  if (!_available) return;
+  Rtc::DateTime dt;
+  if (!_sdkRtc.now(dt) || !validDateTime(dt)) {
+    LOG_ERR("CLK", "RTC date unavailable or invalid");
+    return;
+  }
+  const timeval tv = {epochFromUtc(dt), 0};
+  if (settimeofday(&tv, nullptr) != 0) LOG_ERR("CLK", "Cannot restore system time from RTC");
+}
+
 void HalClock::setTimezone(const char* posixTz) {
   setenv("TZ", posixTz && posixTz[0] != '\0' ? posixTz : "UTC0", 1);
   tzset();
@@ -40,7 +61,7 @@ bool HalClock::localTime(struct tm& out) const {
   const unsigned long now = millis();
   if (_lastPollMs == 0 || (now - _lastPollMs) >= CLOCK_POLL_MS) {
     Rtc::DateTime dt;
-    if (_sdkRtc.now(dt)) {
+    if (_sdkRtc.now(dt) && validDateTime(dt)) {
       _cachedUtc = epochFromUtc(dt);
       _hasCachedTime = true;
     } else if (!_hasCachedTime) {
@@ -76,6 +97,12 @@ bool HalClock::formatTime(char* buf, size_t bufSize, bool use12Hour) const {
   return true;
 }
 
+bool HalClock::formatDate(char* buf, size_t bufSize) const {
+  struct tm local;
+  if (bufSize < 11 || !localTime(local)) return false;
+  return strftime(buf, bufSize, "%Y-%m-%d", &local) != 0;
+}
+
 bool HalClock::syncFromNTP() {
   if (!_available) return false;
 
@@ -108,7 +135,7 @@ bool HalClock::syncFromNTP() {
       dt.minute = static_cast<uint8_t>(timeinfo.tm_min);
       dt.second = static_cast<uint8_t>(timeinfo.tm_sec);
       dt.weekday = static_cast<uint8_t>(timeinfo.tm_wday);
-      const bool ok = _sdkRtc.set(dt);
+      const bool ok = validDateTime(dt) && _sdkRtc.set(dt);
       if (ok) {
         _cachedUtc = epochFromUtc(dt);
         _hasCachedTime = true;

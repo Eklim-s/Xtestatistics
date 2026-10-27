@@ -16,7 +16,12 @@ const document = {
   getElementById: node,
   querySelector: () => ({ previousElementSibling: { querySelector: () => node('dow') } }),
 };
-const sandbox = { document, fetch: () => Promise.reject(new Error('Offline test')) };
+const fixedNow = new Date(2026, 9, 2, 12).getTime();
+class TestDate extends Date {
+  constructor(...args) { super(...(args.length ? args : [fixedNow])); }
+  static now() { return fixedNow; }
+}
+const sandbox = { document, Date: TestDate, fetch: () => Promise.reject(new Error('Offline test')) };
 vm.createContext(sandbox);
 vm.runInContext(code, sandbox);
 
@@ -42,6 +47,16 @@ sandbox.renderStats([{ s: midnight, e: midnight + 60, d: 60, b: 123, doc: '__pro
 assert.match(node('stats-row').innerHTML, /<div class="num">10<\/div><div class="lbl">Avg\/day/);
 assert.match(node('stats-row').innerHTML, /<div class="num">100<\/div><div class="lbl">Days read/);
 assert.doesNotMatch(node('bar-chart').innerHTML, /height:2px/);
+assert.match(node('bar-chart').innerHTML, /height:90px.*title="1 min"/,
+  'A session in the current week must appear in the seven-day chart');
+assert.match(node('bar-chart').innerHTML, /class="bar-label">2\/F/);
+assert.match(node('stats-row').innerHTML, /<div class="num">1000<\/div><div class="lbl">Total/,
+  'Lifetime totals must come from the summary even when detailed sessions were compacted');
+assert.equal(node('record-num').textContent, 90);
+const halfOpen = Object.create(null);
+sandbox.addSession(halfOpen, midnight - 600, midnight, 600);
+assert.deepEqual(Object.keys(halfOpen), ['2026-10-01'],
+  'An endpoint at midnight must not add an unread day');
 assert.match(node('book-list').innerHTML, /Unknown/);
 assert.equal((node('bar-chart').innerHTML.match(/class="bar-col"/g) || []).length, 7);
 

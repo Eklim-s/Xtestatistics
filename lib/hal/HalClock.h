@@ -19,7 +19,8 @@ class HalClock {
   static constexpr unsigned long CLOCK_POLL_MS = 10000;  // 10 seconds
 
  public:
-  // Call after BoardConfig has selected the active device.
+  // Call after device selection, before TrustedTime initialization and time consumers.
+  // Restores system UTC from a valid RTC date; TrustedTime then applies its floor.
   void begin();
 
   // True if an RTC is present on this device
@@ -42,6 +43,9 @@ class HalClock {
   // 24h mode produces "HH:MM" (needs >=6 bytes); 12h mode produces "H:MM AM"/"HH:MM PM" (needs >=9 bytes).
   // Returns false if RTC is not available.
   bool formatTime(char* buf, size_t bufSize, bool use12Hour = false) const;
+
+  // Local calendar date in ISO format (YYYY-MM-DD), needs >=11 bytes.
+  bool formatDate(char* buf, size_t bufSize) const;
 
   // Sync the RTC from an NTP server. Requires WiFi to be connected.
   // Blocks for up to ~5s while waiting for SNTP response.

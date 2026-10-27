@@ -25,13 +25,13 @@ void ReaderSession::onRenderComplete(const uint32_t monotonicMs, const int64_t t
         endProgress = anchorProgress;
       }
       duration += contribution;
-      endEpoch = trustedEpoch;
+      endEpoch = std::max({trustedEpoch, anchorEpoch + contribution, endEpoch});
       endProgress = std::max(endProgress, progress);
     }
   }
 
   anchorMs = monotonicMs;
-  anchorEpoch = trustedEpoch;
+  anchorEpoch = trustedEpoch > 0 ? std::max(trustedEpoch, endEpoch) : 0;
   anchorProgress = progress;
   hasAnchor = true;
   pendingForward = false;
@@ -49,10 +49,11 @@ void ReaderSession::finalize(const uint32_t monotonicMs, const int64_t trustedEp
     endProgress = anchorProgress;
   }
   duration += contribution;
-  endEpoch = trustedEpoch;
+  // A backward SNTP correction can hold TrustedTime at its floor while millis advances.
+  endEpoch = std::max({trustedEpoch, anchorEpoch + contribution, endEpoch});
   endProgress = std::max(endProgress, clampProgress(progressBp));
   anchorMs = monotonicMs;
-  anchorEpoch = trustedEpoch;
+  anchorEpoch = endEpoch;
   anchorProgress = clampProgress(progressBp);
 }
 

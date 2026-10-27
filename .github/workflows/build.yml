@@ -2,7 +2,7 @@ name: Build Firmware
 
 on:
   push:
-    branches: [main]
+    branches: [main, fix/reading-stats-recovery]
   workflow_dispatch:
 
 jobs:
@@ -24,9 +24,10 @@ jobs:
           version: "latest"
           enable-cache: false
 
-      - name: Install PlatformIO Core 6.1.19
+      - name: Install PlatformIO Core 6.2.0.post1
         run: |
-          uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+          uv pip install --system -U 'pioarduino==6.2.0.post1'
+          python scripts/patch_pioarduino_core_version.py
           uv pip install --system -U "littlefs-python>=0.16.0" "fatfs-ng>=0.1.14" "pyyaml>=6.0.2" \
             "rich-click>=1.8.6" "zopfli>=0.2.2" "intelhex>=2.3.0" "rich>=14.0.0" "urllib3<2" \
             "cryptography>=45.0.3" "certifi>=2025.8.3" "ecdsa>=0.19.1" "bitstring>=4.3.1" \
@@ -42,7 +43,8 @@ jobs:
       - name: Pin pioarduino core inside platform penv
         run: |
           pio pkg install -e default
-          uv pip install --python ~/.platformio/penv/bin/python "pioarduino==6.1.19"
+          uv pip install --python ~/.platformio/penv/bin/python "pioarduino==6.2.0.post1"
+          ~/.platformio/penv/bin/python scripts/patch_pioarduino_core_version.py
 
       - name: Build firmware
         run: pio run -e default

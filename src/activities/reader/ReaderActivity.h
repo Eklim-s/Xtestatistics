@@ -18,6 +18,11 @@ class ReaderActivity : public Activity {
   std::unique_ptr<EndOfBookOptions> endOfBookOptions;
   std::atomic<bool> endOfBookOptionsReady{false};
   ReaderSession readerSession;
+  bool readingPageRejected = false;
+  void rejectReadingPage() {
+    readingPageRejected = true;
+    readerSession.suspend();
+  }
   std::atomic<bool> pageRendered{false};
   bool bookRemembered = false;
   void markPageRendered() { pageRendered.store(true, std::memory_order_release); }

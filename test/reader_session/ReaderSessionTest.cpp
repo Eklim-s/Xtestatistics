@@ -119,4 +119,31 @@ TEST(ReaderSession, MonotonicElapsedHandlesMillisWrap) {
   EXPECT_EQ(session.durationSeconds(), 5u);
 }
 
+TEST(ReaderSession, FrozenOrBackwardClockKeepsMonotonicDwellAndRetryDoesNotDuplicate) {
+  for (int64_t now : {1000, 900}) {
+    ReaderSession session;
+    anchor(session, 0, 1000, 0);
+    turnAndRender(session, true, true, 60000, now, 100);
+    session.finalize(120000, now, 200);
+    EXPECT_TRUE(session.isEmitWorthy());
+    EXPECT_EQ(session.durationSeconds(), 120u);
+    EXPECT_EQ(session.endTime(), 1120);
+    session.finalize(120000, now, 200);
+    EXPECT_EQ(session.durationSeconds(), 120u);
+  }
+}
+
+TEST(ReaderSession, SuspendedErrorScreenDoesNotCountAndReadingCanResume) {
+  ReaderSession session;
+  anchor(session, 0, 1000, 0);
+  turnAndRender(session, true, true, 60000, 1060, 100);
+  session.noteTurn(true, true);
+  session.suspend();
+  session.finalize(120000, 1120, 200);
+  EXPECT_EQ(session.durationSeconds(), 60u);
+  anchor(session, 120000, 1120, 100);
+  session.finalize(180000, 1180, 200);
+  EXPECT_EQ(session.durationSeconds(), 120u);
+}
+
 }  // namespace

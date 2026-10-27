@@ -289,8 +289,10 @@ void ReaderActivity::render(RenderLock&&) {
     return;
   }
 
+  readingPageRejected = false;
   renderBook();
-  readerSession.onRenderComplete(millis(), trustedtime::trustedNow(), getProgressBasisPoints());
+  if (!readingPageRejected)
+    readerSession.onRenderComplete(millis(), trustedtime::trustedNow(), getProgressBasisPoints());
 }
 
 bool ReaderActivity::handleForcedRefresh() {

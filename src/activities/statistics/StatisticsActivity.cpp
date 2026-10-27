@@ -38,10 +38,14 @@ void StatisticsActivity::render(RenderLock&&) {
 
   int y = MARGIN;
   y = drawHeader(y);
-  y = drawStreak(y);
-  y = drawKeyStats(y);
-  y = drawWeekBars(y);
-  drawMonthGrid(y);
+  if (summary.available) {
+    y = drawStreak(y);
+    y = drawKeyStats(y);
+    y = drawWeekBars(y);
+    drawMonthGrid(y);
+  } else {
+    renderer.drawText(SMALL_FONT_ID, MARGIN, y, tr(STR_STATS_READ_ERROR));
+  }
 
   const auto labels = mappedInput.mapLabels("", "", "", tr(STR_BACK));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

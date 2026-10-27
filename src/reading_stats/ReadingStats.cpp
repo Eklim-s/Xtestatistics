@@ -910,6 +910,8 @@ ReadingStatsSummary analyze(int maxDays, int64_t todayEpoch) {
   bool haveAggregate = loadAggregate(aggregate);
   if (!haveAggregate && !Storage.exists(SUMMARY_FILE) && Storage.exists(STATS_FILE))
     haveAggregate = buildLegacyDates(&aggregate);
+  if (!haveAggregate && (Storage.exists(SUMMARY_FILE) || Storage.exists(STATS_FILE))) return sum;
+  sum.available = true;
 
   if (daySeconds.empty()) {
     if (haveAggregate) {

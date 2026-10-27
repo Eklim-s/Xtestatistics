@@ -10,6 +10,11 @@ class ReaderSession {
   void onRenderComplete(uint32_t monotonicMs, int64_t trustedEpoch, int progressBp);
   void finalize(uint32_t monotonicMs, int64_t trustedEpoch, int progressBp);
   void reset();
+  // Stop counting dwell while an error or non-reading screen is visible.
+  void suspend() {
+    hasAnchor = false;
+    pendingForward = false;
+  }
 
   bool isEmitWorthy() const { return startEpoch > 0 && duration >= 10 && endTime() > startEpoch; }
   int64_t startTime() const { return startEpoch; }

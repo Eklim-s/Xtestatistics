@@ -551,6 +551,7 @@ void EpubReaderActivity::openClippings() {
 
 void EpubReaderActivity::loop() {
   if (loadFailurePopup.isActive()) {
+    rejectReadingPage();
     loadFailurePopup.handleInput(mappedInput, [this] { requestUpdate(); });
     return;
   }
@@ -1479,6 +1480,7 @@ void EpubReaderActivity::renderBook() {
   };
 
   const auto showBuildError = [this]() {
+    rejectReadingPage();
     renderer.clearScreen();
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -1710,6 +1712,7 @@ void EpubReaderActivity::renderBook() {
   renderer.clearScreen();
 
   if (section->pageCount == 0) {
+    rejectReadingPage();
     LOG_DBG("ERS", "No pages to render");
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_EMPTY_CHAPTER), true, EpdFontFamily::BOLD);
     renderStatusBar();
@@ -1721,6 +1724,7 @@ void EpubReaderActivity::renderBook() {
   }
 
   if (section->currentPage < 0 || section->currentPage >= section->pageCount) {
+    rejectReadingPage();
     LOG_DBG("ERS", "Page out of bounds: %d (max %d)", section->currentPage, section->pageCount);
     renderer.drawCenteredText(UI_12_FONT_ID, 300, tr(STR_OUT_OF_BOUNDS), true, EpdFontFamily::BOLD);
     renderStatusBar();
@@ -1735,6 +1739,7 @@ void EpubReaderActivity::renderBook() {
   {
     auto p = section->loadPage(section->currentPage);
     if (!p) {
+      rejectReadingPage();
       LOG_ERR("ERS", "Failed to load page from SD - clearing section cache");
       automaticPageTurnActive = false;
       const bool giveUp = ++pageLoadRetryCount > MAX_PAGE_LOAD_RETRIES;

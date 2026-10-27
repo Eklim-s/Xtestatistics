@@ -24,11 +24,12 @@ enum MenuItem {
   ITEM_FORMAT,
   ITEM_SHOW_ON_HOME,
   ITEM_SYNC,
+  ITEM_DATE,
 };
 
 const StrId menuNames[ClockSettingsActivity::ITEM_COUNT] = {
     StrId::STR_TIMEZONE,        StrId::STR_CLOCK_DST,      StrId::STR_CLOCK_FORMAT,
-    StrId::STR_CLOCK_IN_HEADER, StrId::STR_CLOCK_SYNC_NOW,
+    StrId::STR_CLOCK_IN_HEADER, StrId::STR_CLOCK_SYNC_NOW, StrId::STR_DATE,
 };
 
 const StrId dstNames[CrossPointSettings::CLOCK_DST_MODE_COUNT] = {StrId::STR_CLOCK_DST_AUTO, StrId::STR_STATE_ON,
@@ -89,7 +90,7 @@ void ClockSettingsActivity::buildScreen(UiScreen& screen) {
                                                 static_cast<int16_t>(metrics.buttonHintsHeight), 0});
   screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 
-  // Every value is a flash/translation string or the member time buffer, so
+  // Values use flash/translation strings or member buffers, so
   // the render pass allocates nothing.
   rowItems_[ITEM_TIMEZONE].value = timezones::table()[timezones::activeIndex()].name;
   const uint8_t dst = SETTINGS.clockDst < CrossPointSettings::CLOCK_DST_MODE_COUNT ? SETTINGS.clockDst : uint8_t{0};
@@ -97,11 +98,10 @@ void ClockSettingsActivity::buildScreen(UiScreen& screen) {
   rowItems_[ITEM_FORMAT].value = SETTINGS.clockFormat == 1 ? tr(STR_CLOCK_FORMAT_12H) : tr(STR_CLOCK_FORMAT_24H);
   GUI.setCheckboxRow(rowItems_[ITEM_SHOW_ON_HOME], SETTINGS.clockShowInHeader);
   // The sync row's value is the current time itself: it confirms the sync,
-  // previews format/zone changes, and reads "Not Set" until the first sync.
+  // previews format/zone changes, and reads "Not Set" without a valid RTC date.
   rowItems_[ITEM_SYNC].value =
-      SETTINGS.clockHasBeenSynced && halClock.formatTime(syncTime_, sizeof(syncTime_), SETTINGS.clockFormat == 1)
-          ? syncTime_
-          : tr(STR_NOT_SET);
+      halClock.formatTime(syncTime_, sizeof(syncTime_), SETTINGS.clockFormat == 1) ? syncTime_ : tr(STR_NOT_SET);
+  rowItems_[ITEM_DATE].value = halClock.formatDate(date_, sizeof(date_)) ? date_ : tr(STR_NOT_SET);
 
   fui::ListProps props;
   props.items = rowItems_;

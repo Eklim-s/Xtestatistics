@@ -4,9 +4,9 @@
 
 // A monotonic floor under the system clock, for loan-expiry enforcement.
 //
-// The ESP32-C3 keeps time through deep sleep but loses it on power-off, and
-// the device has no battery-backed RTC — so a cold boot starts near epoch 0
-// and a date-based check would never fire offline. This module persists the
+// The ESP32-C3 keeps time through deep sleep but loses it on power-off.
+// HalClock restores UTC on boards with a valid RTC before init(). Otherwise
+// a cold boot can start near epoch 0. This module persists the
 // last known-good time in NVS (on-flash, not on the removable SD card) and
 // restores it into the system clock at boot, so time only ever moves forward
 // across power cycles. Real time snaps in whenever Wi-Fi is up via SNTP.

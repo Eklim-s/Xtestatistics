@@ -8,7 +8,7 @@ class ClockSettingsActivity final : public UiListActivity {
  public:
   explicit ClockSettingsActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
 
-  static constexpr int ITEM_COUNT = 5;
+  static constexpr int ITEM_COUNT = 6;
 
   void onEnter() override;
 
@@ -19,8 +19,8 @@ class ClockSettingsActivity final : public UiListActivity {
   const char* headerTitle() const override;
 
   // Row values are flash/translation strings assigned directly into rowItems_;
-  // the one formatted value (the sync row's live time) lives here so its
-  // pointer stays valid across the frame. Fits "HH:MM PM" + NUL.
+  // Formatted time and date live here so pointers stay valid across the frame.
   char syncTime_[9] = {0};
+  char date_[11] = {0};
   freeink::ui::ListItem rowItems_[ITEM_COUNT]{};
 };

@@ -9,6 +9,8 @@ cmake -S test -B .cache/host-tests
 cmake --build .cache/host-tests --parallel 2
 ctest --test-dir .cache/host-tests --output-on-failure
 node test/reading_stats/viewer.test.cjs
+python3 test/test_hal_clock.py
+python3 test/test_trusted_time.py
 ./bin/clang-format-fix -g
 pio run -e default
 ```
@@ -21,6 +23,17 @@ checks the two browser views without a live device. These checks do not prove
 SD durability, device performance, HTTP transport, or plugin delivery on hardware.
 
 ## Required device checks
+
+Clock regression checks: synchronize once, note the date in Clock settings,
+turn Wi-Fi off, power off for several minutes, then restart. The date/time must
+advance and a new reading session must use that local day. Repeat across local
+midnight and with a timezone on the other side of UTC midnight. Check date-row
+visibility in all orientations and both 12/24-hour formats. Invalid RTC dates
+are rejected in host tests; no hardware fault injection is claimed.
+
+On a test setup, leave an EPUB page-load error visible for a minute and exit:
+that error-screen dwell must not increase reading time. A statistics read
+failure must show an error, and reopening after recovery must restore totals.
 
 The human owner must test hardware before opening a PR. Use a spare SD card,
 back up the entire `/ReadingStats` directory, and keep any recovery files intact.

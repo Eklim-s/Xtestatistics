@@ -1,5 +1,5 @@
-#include <gtest/gtest.h>
 #include <HalStorage.h>
+#include <gtest/gtest.h>
 
 #include <cstdlib>
 #include <ctime>
@@ -41,6 +41,28 @@ TEST_F(ReadingStatsTest, AccumulatesSecondsWithoutBootstrapRounding) {
   statsTest::files[SESSIONS] = "{\"s\":" + std::to_string(now) + ",\"d\":59}\n";
   ASSERT_TRUE(append(now + 120, 1));
   EXPECT_EQ(ReadingStats::analyze(0, now).totalMinutes, 1);
+}
+
+TEST_F(ReadingStatsTest, ReadFailuresAreUnavailableRatherThanEmptyOrPartialTotals) {
+  const auto now = epoch(2026, 10, 1);
+  ASSERT_TRUE(append(now));
+  ASSERT_TRUE(append(now + 86400));
+  statsTest::failRead = SESSIONS;
+  EXPECT_FALSE(ReadingStats::analyze(1, now).available);
+  statsTest::failRead = SUMMARY;
+  EXPECT_FALSE(ReadingStats::analyze(1, now).available);
+  statsTest::failRead.clear();
+  statsTest::failOpen = SUMMARY;
+  EXPECT_FALSE(ReadingStats::analyze(1, now).available);
+  statsTest::failOpen.clear();
+  const auto recovered = ReadingStats::analyze(1, now);
+  EXPECT_TRUE(recovered.available);
+  EXPECT_EQ(recovered.totalMinutes, 2);
+  EXPECT_EQ(recovered.totalDays, 2);
+}
+
+TEST_F(ReadingStatsTest, EmptyHistoryIsAvailable) {
+  EXPECT_TRUE(ReadingStats::analyze(366, epoch(2026, 10, 1)).available);
 }
 
 TEST_F(ReadingStatsTest, MidnightEndpointDoesNotCountUnreadDay) {
@@ -315,7 +337,7 @@ TEST_F(ReadingStatsTest, ApiCalendarAuthorityIsDeviceLocal) {
 TEST_F(ReadingStatsTest, SparseLegacyYearsSkipEmptyCalendarWindows) {
   const auto first = epoch(1970, 1, 1), last = epoch(9999, 1, 1);
   statsTest::files[SESSIONS] = std::string(32000, '\n') + "{\"s\":" + std::to_string(first) +
-      ",\"d\":60}\n{\"s\":" + std::to_string(last) + ",\"d\":60}\n";
+                               ",\"d\":60}\n{\"s\":" + std::to_string(last) + ",\"d\":60}\n";
   const auto originalSize = statsTest::files[SESSIONS].size();
   ASSERT_TRUE(append(epoch(2026, 10, 1)));
   EXPECT_LE(statsTest::readBytes[SESSIONS], originalSize * 4 + 1024);
