@@ -20,7 +20,8 @@ class ClockSettingsActivity final : public UiListActivity {
 
   // Row values are flash/translation strings assigned directly into rowItems_;
   // the one formatted value (the sync row's live time) lives here so its
-  // pointer stays valid across the frame. Fits "HH:MM PM" + NUL.
-  char syncTime_[9] = {0};
+  // pointer stays valid across the frame. Fits "YYYY-MM-DD HH:MM PM" + NUL.
+  char syncTime_[24] = {0};
   freeink::ui::ListItem rowItems_[ITEM_COUNT]{};
 };
+

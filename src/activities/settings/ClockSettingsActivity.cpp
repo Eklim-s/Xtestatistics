@@ -96,12 +96,16 @@ void ClockSettingsActivity::buildScreen(UiScreen& screen) {
   rowItems_[ITEM_DST].value = I18N.get(dstNames[dst]);
   rowItems_[ITEM_FORMAT].value = SETTINGS.clockFormat == 1 ? tr(STR_CLOCK_FORMAT_12H) : tr(STR_CLOCK_FORMAT_24H);
   GUI.setCheckboxRow(rowItems_[ITEM_SHOW_ON_HOME], SETTINGS.clockShowInHeader);
-  // The sync row's value is the current time itself: it confirms the sync,
-  // previews format/zone changes, and reads "Not Set" until the first sync.
-  rowItems_[ITEM_SYNC].value =
-      SETTINGS.clockHasBeenSynced && halClock.formatTime(syncTime_, sizeof(syncTime_), SETTINGS.clockFormat == 1)
-          ? syncTime_
-          : tr(STR_NOT_SET);
+  // Show the RTC date too, so a correct hour cannot hide an incorrect day.
+  struct tm local{};
+  char time[9];
+  if (halClock.localTime(local) && halClock.formatTime(time, sizeof(time), SETTINGS.clockFormat == 1)) {
+    snprintf(syncTime_, sizeof(syncTime_), "%04d-%02d-%02d %s", local.tm_year + 1900, local.tm_mon + 1,
+             local.tm_mday, time);
+    rowItems_[ITEM_SYNC].value = syncTime_;
+  } else {
+    rowItems_[ITEM_SYNC].value = tr(STR_NOT_SET);
+  }
 
   fui::ListProps props;
   props.items = rowItems_;
@@ -114,3 +118,4 @@ void ClockSettingsActivity::buildScreen(UiScreen& screen) {
   syncListViewport(screen, props);
   screen.list(props);
 }
+

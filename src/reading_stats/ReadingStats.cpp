@@ -161,6 +161,22 @@ int nextDayKey(int key) {
   return ymdKey(year, month, day);
 }
 
+int currentStreakAt(const AggregateSummary& aggregate, int64_t todayEpoch) {
+  int y, m, d;
+  epochToYmd(todayEpoch, y, m, d);
+  const int today = ymdKey(y, m, d);
+  const int lastYear = aggregate.lastDay / 10000;
+  const int lastMonth = aggregate.lastDay / 100 % 100;
+  const int lastDay = aggregate.lastDay % 100;
+  if (lastYear < 1970 || lastYear > 9999 || lastMonth < 1 || lastMonth > 12 || lastDay < 1 ||
+      lastDay > daysInMonth(lastYear, lastMonth)) return 0;
+  if (aggregate.lastDay == today ||
+      (aggregate.lastDay > 0 && nextDayKey(aggregate.lastDay) == today)) {
+    return aggregate.currentStreak;
+  }
+  return 0;
+}
+
 void addSessionSeconds(std::map<int, int64_t>& daySeconds, int64_t startEpoch, int64_t endEpoch, int64_t duration) {
   if (endEpoch <= startEpoch || endEpoch - startEpoch > 7 * 86400LL || duration > endEpoch - startEpoch) {
     int y, m, d;
@@ -186,6 +202,7 @@ void addSessionSeconds(std::map<int, int64_t>& daySeconds, int64_t startEpoch, i
     nextDay.tm_min = 0;
     nextDay.tm_sec = 0;
     nextDay.tm_mday++;
+    nextDay.tm_isdst = -1;
     const int64_t boundary = static_cast<int64_t>(mktime(&nextDay));
     const int64_t segmentEnd = boundary > cursor ? std::min(boundary, endEpoch) : endEpoch;
     const int64_t segment = segmentEnd - cursor;
@@ -395,7 +412,7 @@ bool appendSession(const char* bookPath, const char* document, int64_t startEpoc
       aggregate.lastDay = key;
     };
     addDay(startEpoch);
-    if (endEpoch > startEpoch) addDay(endEpoch);
+    if (endEpoch > startEpoch) addDay(endEpoch - 1);
     return saveAggregate(aggregate);
   };
 
@@ -541,7 +558,7 @@ ReadingStatsSummary analyze(int maxDays, int64_t todayEpoch) {
       sum.totalMinutes = static_cast<int>(aggregate.totalSeconds / 60);
       sum.totalDays = aggregate.totalDays;
       sum.averageMinutes = sum.totalDays > 0 ? sum.totalMinutes / sum.totalDays : 0;
-      sum.streakDays = aggregate.currentStreak;
+      sum.streakDays = currentStreakAt(aggregate, todayEpoch);
       sum.recordStreakDays = aggregate.recordStreak;
     }
     return sum;
@@ -657,7 +674,7 @@ ReadingStatsSummary analyze(int maxDays, int64_t todayEpoch) {
     sum.totalMinutes = static_cast<int>(aggregate.totalSeconds / 60);
     sum.totalDays = aggregate.totalDays;
     sum.averageMinutes = sum.totalDays > 0 ? sum.totalMinutes / sum.totalDays : 0;
-    sum.streakDays = aggregate.currentStreak;
+    sum.streakDays = currentStreakAt(aggregate, todayEpoch);
     sum.recordStreakDays = aggregate.recordStreak;
   }
 
@@ -665,3 +682,4 @@ ReadingStatsSummary analyze(int maxDays, int64_t todayEpoch) {
 }
 
 }  // namespace ReadingStats
+

@@ -15,10 +15,15 @@ void StatisticsActivity::onEnter() {
   Activity::onEnter();
   screenW = renderer.getScreenWidth();
   screenH = renderer.getScreenHeight();
-  contentW = screenW - 2 * MARGIN;
+  const auto area = GUI.getScreenSafeArea(renderer, true);
+  contentLeft = area.x + MARGIN;
+  contentTop = area.y + MARGIN;
+  contentW = area.width - 2 * MARGIN;
+  contentBottom = area.y + area.height - MARGIN;
 
   const int64_t trustedNow = trustedtime::trustedNow();
   const int64_t now = trustedNow > 0 ? trustedNow : static_cast<int64_t>(time(nullptr));
+  displayEpoch = static_cast<time_t>(now);
   summary = ReadingStats::analyze(366, now);  // up to one year of daily data
   dataLoaded = true;
   requestUpdate();
@@ -36,7 +41,7 @@ void StatisticsActivity::render(RenderLock&&) {
 
   renderer.clearScreen();
 
-  int y = MARGIN;
+  int y = contentTop;
   y = drawHeader(y);
   y = drawStreak(y);
   y = drawKeyStats(y);
@@ -50,11 +55,18 @@ void StatisticsActivity::render(RenderLock&&) {
 }
 
 int StatisticsActivity::drawHeader(int y) {
-  renderer.drawText(UI_12_FONT_ID, MARGIN, y, tr(STR_STATISTICS_TITLE), true, EpdFontFamily::BOLD);
+  renderer.drawText(UI_12_FONT_ID, contentLeft, y, tr(STR_STATISTICS_TITLE), true, EpdFontFamily::BOLD);
   y += renderer.getLineHeight(UI_12_FONT_ID) + 2;
 
+  std::tm local{};
+  char date[16];
+  if (localtime_r(&displayEpoch, &local) && strftime(date, sizeof(date), "%Y-%m-%d", &local) > 0) {
+    renderer.drawText(SMALL_FONT_ID, contentLeft, y, date);
+    y += renderer.getLineHeight(SMALL_FONT_ID) + 2;
+  }
+
   // Thin separator line.
-  renderer.drawLine(MARGIN, y, screenW - MARGIN, y);
+  renderer.drawLine(contentLeft, y, contentLeft + contentW, y);
   y += 4;
   return y;
 }
@@ -65,12 +77,12 @@ int StatisticsActivity::drawStreak(int y) {
 
   // Streak.
   snprintf(buf, sizeof(buf), "%s: %d %s", tr(STR_STATS_STREAK), summary.streakDays, tr(STR_STATS_DAYS));
-  renderer.drawText(SMALL_FONT_ID, MARGIN, y, buf);
+  renderer.drawText(SMALL_FONT_ID, contentLeft, y, buf);
   y += lineH + 2;
 
   // Record.
   snprintf(buf, sizeof(buf), "%s: %d %s", tr(STR_STATS_RECORD), summary.recordStreakDays, tr(STR_STATS_DAYS));
-  renderer.drawText(SMALL_FONT_ID, MARGIN, y, buf);
+  renderer.drawText(SMALL_FONT_ID, contentLeft, y, buf);
   y += lineH + 6;
   return y;
 }
@@ -81,42 +93,45 @@ int StatisticsActivity::drawKeyStats(int y) {
 
   // Today.
   snprintf(buf, sizeof(buf), "%s: %d %s", tr(STR_STATS_TODAY), summary.todayMinutes, tr(STR_STATS_MINUTES));
-  renderer.drawText(SMALL_FONT_ID, MARGIN, y, buf);
+  renderer.drawText(SMALL_FONT_ID, contentLeft, y, buf);
   y += lineH + 2;
 
   // Total.
   int hours = summary.totalMinutes / 60;
   int mins = summary.totalMinutes % 60;
   snprintf(buf, sizeof(buf), "%s: %dh %dm", tr(STR_STATS_TOTAL), hours, mins);
-  renderer.drawText(SMALL_FONT_ID, MARGIN, y, buf);
+  renderer.drawText(SMALL_FONT_ID, contentLeft, y, buf);
   y += lineH + 2;
 
   // Average.
   snprintf(buf, sizeof(buf), "%s: %d %s", tr(STR_STATS_AVERAGE), summary.averageMinutes, tr(STR_STATS_MINUTES));
-  renderer.drawText(SMALL_FONT_ID, MARGIN, y, buf);
+  renderer.drawText(SMALL_FONT_ID, contentLeft, y, buf);
   y += lineH + 6;
   return y;
 }
 
 int StatisticsActivity::drawWeekBars(int y) {
   const int lineH = renderer.getLineHeight(SMALL_FONT_ID);
-  renderer.drawText(SMALL_FONT_ID, MARGIN, y, tr(STR_STATS_LAST_7), true, EpdFontFamily::BOLD);
+  renderer.drawText(SMALL_FONT_ID, contentLeft, y, tr(STR_STATS_LAST_7), true, EpdFontFamily::BOLD);
   y += lineH + 4;
 
   // Last 7 calendar days, including days without a reading session.
   const int barW = std::max(6, (contentW - 28) / 7 - 4);
-  const int barH = std::max(20, screenH / 6);
+  // Reserve calendar headers and six rows before sizing the chart.
+  const int calendarReserve = 3 * lineH + 10 + 6 * (lineH + 4);
+  const int barH = std::max(0, std::min(screenH / 6, contentBottom - y - lineH - 10 - calendarReserve));
   const int barBaseY = y + barH;
 
   int maxMins = 1;
   int dayLabels[7] = {0};
   int dayHeights[7] = {0};
-  const int64_t trustedNow = trustedtime::trustedNow();
-  const time_t now = static_cast<time_t>(trustedNow > 0 ? trustedNow : time(nullptr));
+  const time_t now = displayEpoch;
   for (int i = 0; i < 7; ++i) {
-    const time_t dayEpoch = now - static_cast<time_t>(6 - i) * 86400;
     std::tm localDay{};
-    if (localtime_r(&dayEpoch, &localDay) == nullptr) continue;
+    if (localtime_r(&now, &localDay) == nullptr) continue;
+    localDay.tm_mday -= 6 - i;
+    localDay.tm_isdst = -1;
+    if (mktime(&localDay) == static_cast<time_t>(-1)) continue;
     dayLabels[i] = localDay.tm_mday;
     const int year = localDay.tm_year + 1900;
     const int month = localDay.tm_mon + 1;
@@ -130,8 +145,8 @@ int StatisticsActivity::drawWeekBars(int y) {
   }
 
   for (int i = 0; i < 7; i++) {
-    int x = MARGIN + i * (barW + 4) + 4;
-    if (dayHeights[i] > 0) {
+    int x = contentLeft + i * (barW + 4) + 4;
+    if (dayHeights[i] > 0 && barH > 0) {
       const int h = std::max(1, dayHeights[i] * barH / maxMins);
       renderer.fillRect(x, barBaseY - h, barW, h, true);
     }
@@ -148,17 +163,16 @@ int StatisticsActivity::drawWeekBars(int y) {
 
 int StatisticsActivity::drawMonthGrid(int y) {
   const int lineH = renderer.getLineHeight(SMALL_FONT_ID);
-  renderer.drawText(SMALL_FONT_ID, MARGIN, y, tr(STR_STATS_CALENDAR), true, EpdFontFamily::BOLD);
+  renderer.drawText(SMALL_FONT_ID, contentLeft, y, tr(STR_STATS_CALENDAR), true, EpdFontFamily::BOLD);
   y += lineH + 4;
 
   if (summary.daily.empty()) {
-    renderer.drawText(SMALL_FONT_ID, MARGIN, y, tr(STR_STATS_NO_DATA));
+    renderer.drawText(SMALL_FONT_ID, contentLeft, y, tr(STR_STATS_NO_DATA));
     return y + lineH + 4;
   }
 
   // Show the current local month; days without data remain empty.
-  const int64_t trustedNow = trustedtime::trustedNow();
-  const time_t now = static_cast<time_t>(trustedNow > 0 ? trustedNow : time(nullptr));
+  const time_t now = displayEpoch;
   std::tm current{};
   if (localtime_r(&now, &current) == nullptr) return y;
   int month = current.tm_mon + 1;
@@ -177,78 +191,53 @@ int StatisticsActivity::drawMonthGrid(int y) {
     }
   }
 
-  // Find max for intensity scaling.
-  int maxMin = 1;
-  for (int d = 1; d <= daysInMonth; d++) {
-    if (dayMinutes[d] > maxMin) maxMin = dayMinutes[d];
-  }
-
   // Month name header.
   static const char* MONTH_NAMES[] = {"",    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
                                       "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
   char titleBuf[32];
   snprintf(titleBuf, sizeof(titleBuf), "%s %d", MONTH_NAMES[month], year);
   int tw = renderer.getTextWidth(SMALL_FONT_ID, titleBuf);
-  renderer.drawText(SMALL_FONT_ID, MARGIN + (contentW - tw) / 2, y, titleBuf, true, EpdFontFamily::BOLD);
+  renderer.drawText(SMALL_FONT_ID, contentLeft + (contentW - tw) / 2, y, titleBuf, true, EpdFontFamily::BOLD);
   y += lineH + 1;
 
-  // Day-of-week headers: M T W T F S S (or S M T W T F S)
-  static const char* DOW = "M T W T F S S";
-  int dowW = renderer.getTextWidth(SMALL_FONT_ID, DOW);
-  renderer.drawText(SMALL_FONT_ID, MARGIN + (contentW - dowW) / 2, y, DOW);
-  y += lineH;
-
-  // Compute day-of-week of the 1st. We need to know what day of week the 1st is.
-  // Simple Zeller-like: 2026-10-01 = Saturday (day 6 if Sunday=0), etc.
-  // Use a known anchor: 1970-01-01 = Thursday (4).
-  // Days since 1970:
-  auto daysSince1970 = [](int y, int m, int d) -> int {
-    int days = 0;
-    for (int yy = 1970; yy < y; yy++) {
-      days += (yy % 4 == 0 && (yy % 100 != 0 || yy % 400 == 0)) ? 366 : 365;
-    }
-    static const int md[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-    for (int mm = 1; mm < m; mm++) {
-      days += md[mm - 1];
-      if (mm == 2 && (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0))) days++;
-    }
-    days += d - 1;
-    return days;
-  };
-
-  // Monday=1..Sunday=7. 1970-01-01 = Thursday = 4.
-  int firstDow = ((daysSince1970(year, month, 1) + 3) % 7) + 1;  // 1=Mon
-
-  const int cellSize = std::max(6, (contentW - 12) / 7);
+  std::tm first = current;
+  first.tm_mday = 1;
+  first.tm_hour = 12;
+  first.tm_isdst = -1;
+  if (mktime(&first) == static_cast<time_t>(-1)) return y;
+  const int firstDow = (first.tm_wday + 6) % 7 + 1;
+  const int totalRows = (firstDow + daysInMonth - 2) / 7 + 1;
   const int cellGap = 1;
-  int gy = y + 2;
+  const int gy = y + lineH + 2;
+  const int cellSize = std::min((contentW - 8) / 7 - cellGap,
+                                (contentBottom - gy) / totalRows - cellGap);
+  if (cellSize < lineH + 2) return y;
+  const int gridLeft = contentLeft + (contentW - 7 * (cellSize + cellGap)) / 2;
+  static const char* DOW = "MTWTFSS";
+  for (int col = 0; col < 7; ++col) {
+    const char label[2] = {DOW[col], '\0'};
+    const int width = renderer.getTextWidth(SMALL_FONT_ID, label);
+    renderer.drawText(SMALL_FONT_ID, gridLeft + col * (cellSize + cellGap) + (cellSize - width) / 2, y, label);
+  }
 
   for (int d = 1; d <= daysInMonth; d++) {
     int col = (firstDow + d - 2) % 7;
     int row = (firstDow + d - 2) / 7;
-    int cx = MARGIN + col * (cellSize + cellGap) + 4;
+    int cx = gridLeft + col * (cellSize + cellGap);
     int cy = gy + row * (cellSize + cellGap);
 
-    if (dayMinutes[d] > 0) {
-      // Intensity: 25%–100% fill.
-      int intensity = 25 + (dayMinutes[d] * 75 / maxMin);
-      // Approximate greyscale with dithering via fill percentage.
-      if (intensity >= 90) {
-        renderer.fillRect(cx, cy, cellSize, cellSize, true);
-      } else if (intensity >= 60) {
-        renderer.fillRect(cx, cy, cellSize, cellSize, true);
-        renderer.fillRect(cx + 1, cy + 1, cellSize - 2, cellSize - 2, false);
-      } else if (intensity >= 35) {
-        renderer.drawRect(cx, cy, cellSize, cellSize, true);
-      } else {
-        renderer.drawRect(cx, cy, cellSize, cellSize, true);
-        // Thin border only — already done above.
-      }
+    const bool filled = dayMinutes[d] > 0;
+    if (filled) {
+      renderer.fillRect(cx, cy, cellSize, cellSize, true);
     } else {
       renderer.drawRect(cx, cy, cellSize, cellSize, true);
     }
+    char day[4];
+    snprintf(day, sizeof(day), "%d", d);
+    const int textW = renderer.getTextWidth(SMALL_FONT_ID, day);
+    renderer.drawText(SMALL_FONT_ID, cx + (cellSize - textW) / 2, cy + (cellSize - lineH) / 2, day, !filled);
   }
 
-  int totalRows = (firstDow + daysInMonth - 2) / 7 + 1;
   return y + totalRows * (cellSize + cellGap) + 10;
 }
+

@@ -3,14 +3,10 @@
 #include <Logging.h>
 #include <WiFi.h>
 #include <esp_sntp.h>
+#include <sys/time.h>
 #include <time.h>
 
 HalClock halClock;  // Singleton instance
-
-void HalClock::begin() {
-  _available = _sdkRtc.begin();
-  LOG_INF("CLK", _available ? "SDK RTC found" : "RTC not found");
-}
 
 namespace {
 // UTC calendar date -> Unix epoch, no timezone involvement (newlib has no
@@ -27,6 +23,37 @@ time_t epochFromUtc(const Rtc::DateTime& dt) {
   return static_cast<time_t>(days) * 86400 + dt.hour * 3600L + dt.minute * 60L + dt.second;
 }
 }  // namespace
+
+void HalClock::begin() {
+  _available = _sdkRtc.begin();
+  LOG_INF("CLK", _available ? "SDK RTC found" : "RTC not found");
+  if (!_available) return;
+
+  Rtc::DateTime dt;
+  if (!_sdkRtc.now(dt)) return;
+  if (dt.year < 2025 || dt.year > 2099 || dt.month < 1 || dt.month > 12 || dt.day < 1 || dt.day > 31 ||
+      dt.hour > 23 || dt.minute > 59 || dt.second > 59) {
+    LOG_ERR("CLK", "Invalid RTC date");
+    return;
+  }
+  const time_t epoch = epochFromUtc(dt);
+  struct tm utc{};
+  if (!gmtime_r(&epoch, &utc) || utc.tm_year + 1900 != dt.year || utc.tm_mon + 1 != dt.month ||
+      utc.tm_mday != dt.day) {
+    LOG_ERR("CLK", "Invalid RTC calendar date");
+    return;
+  }
+  // Seed UTC before TrustedTime restores its persisted lower bound.
+  const timeval tv{epoch, 0};
+  if (settimeofday(&tv, nullptr) != 0) {
+    LOG_ERR("CLK", "Cannot restore system time from RTC");
+    return;
+  }
+  _cachedUtc = epoch;
+  _hasCachedTime = true;
+  _lastPollMs = 0;
+  LOG_INF("CLK", "System time restored from RTC");
+}
 
 void HalClock::setTimezone(const char* posixTz) {
   setenv("TZ", posixTz && posixTz[0] != '\0' ? posixTz : "UTC0", 1);
@@ -126,3 +153,4 @@ bool HalClock::syncFromNTP() {
   setTimezone(savedTz);
   return false;
 }
+
