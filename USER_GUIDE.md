@@ -327,7 +327,13 @@ The Settings screen allows you to configure the device's behavior. There are a f
   - "Refresh" - A short press triggers a manual full-screen refresh, useful for clearing ghosting
 - **Quick return from links**: Controls whether a short press of the power button acts as Back after following a link or footnote.
 
+The Statistics screen shows the local date used for its calculations. The seven-day chart includes days without reading. A current streak remains valid through the day after the last reading day and resets after a longer gap. The numbered calendar marks days with at least one accumulated minute. Its cells fit the space above the button hints; on short screens the grid is omitted if readable numbers cannot fit. Reopen Statistics to refresh its date after midnight or clock synchronization.
+
+If sessions were saved with an incorrect system date, correcting the clock affects new sessions only. Keep a backup of `/ReadingStats/sessions.jsonl` before correcting historical entries; the original dates cannot be recovered from the journal alone.
+
 #### 3.6.4 System
+
+- **Clock** (devices with an RTC): Choose the timezone, daylight-saving rule, and 12/24-hour format. The settings show the local date and time; use Wi-Fi sync to correct them. At startup, a valid RTC restores system time for reading statistics. An unavailable or invalid RTC leaves the saved-time fallback in use. The saved lower bound still prevents trusted time from moving backward.
 
 - **Time to Sleep**: Set the duration of inactivity before the device automatically goes to sleep; options are 1, 3, 5, 10 (default), 15 or 30 minutes.
 
@@ -779,3 +785,4 @@ Press **Ctrl-C** or close the graph window to exit.
 If the device is stuck in a bootloop, press and release the Reset button. Then, press and hold on to the configured Back button and the Power Button to boot to the Home Screen.
 
 There can be issues with broken cache or config. In this case, delete the `.crosspoint` directory on your SD card (or consider deleting only `settings.json`, `state.json`, or `epub_*` cache directories in the `.crosspoint/` folder).
+

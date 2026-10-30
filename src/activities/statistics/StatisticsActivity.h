@@ -25,6 +25,10 @@ class StatisticsActivity final : public Activity {
   int screenW = 0;
   int screenH = 0;
   int contentW = 0;
+  int contentLeft = 0;
+  int contentTop = 0;
+  int contentBottom = 0;
+  time_t displayEpoch = 0;
 
   int drawHeader(int y);
   int drawStreak(int y);
