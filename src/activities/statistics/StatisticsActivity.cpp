@@ -15,7 +15,7 @@ void StatisticsActivity::onEnter() {
   Activity::onEnter();
   screenW = renderer.getScreenWidth();
   screenH = renderer.getScreenHeight();
-  const auto area = GUI.getScreenSafeArea(renderer, true);
+  const auto area = UITheme::getInstance().getScreenSafeArea(renderer, true);
   contentLeft = area.x + MARGIN;
   contentTop = area.y + MARGIN;
   contentW = area.width - 2 * MARGIN;
